@@ -11,6 +11,7 @@ interface PlayerState {
   powered: boolean;
   bigMode: boolean;
   pigColor?: string;
+  character?: string;
   slot?: number;
 }
 
@@ -21,6 +22,7 @@ interface GameProps {
   solo: boolean;
   dinoMode?: boolean;
   pigColor?: string;
+  character?: string;
   initialSpeed?: number;
 }
 
@@ -79,6 +81,7 @@ export default function Game({
   solo,
   dinoMode = false,
   pigColor = "pink",
+  character = "pig",
   initialSpeed,
 }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,8 +109,9 @@ export default function Game({
       passed: boolean;
       crushed: boolean;
     }[],
-    coins: [] as { x: number; y: number; collected: boolean; animT: number }[],
+    coins: [] as { x: number; y: number; collected: boolean; animT: number; value: number; radius: number }[],
     mushrooms: [] as { x: number; y: number; collected: boolean }[],
+    poisons: [] as { x: number; y: number; r: number; contactTime: number }[],
     pipeSpeed: CONFIG.baseSpeed,
     pipesWiggling: false,
     pipesPassedCount: 0,
@@ -146,6 +150,7 @@ export default function Game({
     }[],
   });
   const socketRef = useRef<Socket | null>(null);
+  const [socketId, setSocketId] = useState("");
   const [uiScore, setUiScore] = useState(0);
   const [gamePhase, setGamePhase] = useState<
     "waiting" | "countdown" | "playing" | "dead" | "result"
@@ -161,6 +166,8 @@ export default function Game({
     myWon: boolean;
     scores: { username: string; score: number }[];
   } | null>(null);
+  const [rematchVotes, setRematchVotes] = useState<{ votes: number; total: number } | null>(null);
+  const [hasVotedRematch, setHasVotedRematch] = useState(false);
 
   // Canvas responsive scaling
   const [canvasScale, setCanvasScale] = useState(1);
@@ -327,11 +334,14 @@ export default function Game({
     );
     if (!offsets.length) offsets.push(55);
     offsets.forEach((o) => {
+      const isBig = (g.rng?.() ?? Math.random()) < 0.2;
       gameRef.current.coins.push({
         x: pipeX + o,
         y: cy,
         collected: false,
         animT: 0,
+        value: isBig ? 3 : 1,
+        radius: isBig ? 18 : 10,
       });
     });
   }
@@ -339,6 +349,18 @@ export default function Game({
     const gapCY = topH + CONFIG.gapSize / 2;
     const cy = CONFIG.height - gapCY - 18;
     gameRef.current.mushrooms.push({ x: pipeX + 130, y: cy, collected: false });
+  }
+
+  function spawnPoison(pipeX: number, topH: number) {
+    const g = gameRef.current;
+    const gapCY = topH + CONFIG.gapSize / 2; // canvas-Y center of the gap
+    const offsetY = ((g.rng?.() ?? Math.random()) - 0.5) * 80;
+    gameRef.current.poisons.push({
+      x: pipeX + 250,
+      y: gapCY + offsetY, // gapCY is already a canvas-Y coord (from top)
+      r: 40 + Math.floor((g.rng?.() ?? Math.random()) * 25),
+      contactTime: 0,
+    });
   }
 
   function makePipe(x: number) {
@@ -357,6 +379,8 @@ export default function Game({
     spawnCoins(x, topH);
     if ((g.rng?.() ?? Math.random()) < 0.3 && !g.isPowered)
       spawnMushroom(x, topH);
+    if ((g.rng?.() ?? Math.random()) < 0.18)
+      spawnPoison(x, topH);
   }
 
   function initPipes() {
@@ -387,11 +411,14 @@ export default function Game({
     const baseX = cactusX - 260;
     for (let i = 0; i < count; i++) {
       const coinBirdY = 30 + Math.floor(Math.random() * 130);
+      const isBig = Math.random() < 0.2;
       gameRef.current.coins.push({
         x: baseX + i * 55,
         y: CONFIG.height - coinBirdY - 14,
         collected: false,
         animT: 0,
+        value: isBig ? 3 : 1,
+        radius: isBig ? 18 : 10,
       });
     }
   }
@@ -550,22 +577,75 @@ export default function Game({
       if (coin.collected) return;
       coin.animT += 0.06;
       const scaleX = Math.abs(Math.cos(coin.animT));
+      const r = coin.radius;
       ctx.save();
-      ctx.translate(coin.x + 14, coin.y + 14);
+      ctx.translate(coin.x + r, coin.y + r);
       ctx.scale(scaleX, 1);
-      const cGrad = ctx.createRadialGradient(-4, -4, 2, 0, 0, 14);
-      cGrad.addColorStop(0, "#ffe066");
-      cGrad.addColorStop(0.6, "#ffd700");
-      cGrad.addColorStop(1, "#b8860b");
-      ctx.fillStyle = cGrad;
-      ctx.beginPath();
-      ctx.arc(0, 0, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#b8860b";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      if (r >= 18) {
+        // Big coin — brighter gradient + star
+        const cGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 2, 0, 0, r);
+        cGrad.addColorStop(0, "#fff176");
+        cGrad.addColorStop(0.5, "#ffeb3b");
+        cGrad.addColorStop(1, "#f57f17");
+        ctx.fillStyle = cGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#e65100";
+        ctx.lineWidth = 2.5;
+        ctx.stroke();
+        // Star overlay
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        for (let si = 0; si < 5; si++) {
+          const outerA = (si * 4 * Math.PI) / 5 - Math.PI / 2;
+          const innerA = outerA + Math.PI / 5;
+          if (si === 0) ctx.moveTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
+          else ctx.lineTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
+          ctx.lineTo(Math.cos(innerA) * r * 0.25, Math.sin(innerA) * r * 0.25);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Small coin
+        const cGrad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, 1, 0, 0, r);
+        cGrad.addColorStop(0, "#ffe066");
+        cGrad.addColorStop(0.6, "#ffd700");
+        cGrad.addColorStop(1, "#b8860b");
+        ctx.fillStyle = cGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#b8860b";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
       ctx.restore();
     });
+
+    // Poison clouds (flappy mode only)
+    if (!g.dinoMode) {
+      g.poisons.forEach((poison) => {
+        const pulse = 0.55 + 0.45 * Math.abs(Math.sin(g.frame * 0.08 + poison.x * 0.01));
+        ctx.save();
+        ctx.globalAlpha = 0.72 * pulse;
+        const pGrad = ctx.createRadialGradient(poison.x, poison.y, 4, poison.x, poison.y, poison.r);
+        pGrad.addColorStop(0, "rgba(80,200,60,0.95)");
+        pGrad.addColorStop(0.5, "rgba(50,160,30,0.6)");
+        pGrad.addColorStop(1, "rgba(20,100,10,0)");
+        ctx.fillStyle = pGrad;
+        ctx.beginPath();
+        ctx.arc(poison.x, poison.y, poison.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 0.9;
+        ctx.font = `${Math.floor(poison.r * 0.72)}px Arial`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("☠️", poison.x, poison.y);
+        ctx.textBaseline = "alphabetic";
+        ctx.restore();
+      });
+    }
 
     // Mushrooms (both flappy and dino modes)
     g.mushrooms.forEach((m) => {
@@ -595,28 +675,37 @@ export default function Game({
       ctx.restore();
     });
 
-    // Opponents: ghost pigs at their actual Y positions (scales to any player count)
-    if (!g.dinoMode) {
-      g.opponents.forEach((op) => {
-        const opW = op.bigMode ? 52 : 40;
-        const opH = op.bigMode ? 44 : 34;
-        const opX = 96;
-        const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
-        ctx.globalAlpha = op.alive ? 0.5 : 0.2;
-        drawPig(
-          ctx,
-          opX,
-          opY,
-          opW,
-          opH,
-          op.powered,
-          op.bigMode,
-          g.frame,
-          op.pigColor || "pink",
-        );
-        ctx.globalAlpha = 1;
-      });
-    }
+    // Opponents: ghost pigs at their actual Y positions (both flappy and dino modes)
+    g.opponents.forEach((op) => {
+      const opW = g.dinoMode ? 30 : (op.bigMode ? 52 : 40);
+      const opH = g.dinoMode ? 30 : (op.bigMode ? 44 : 34);
+      const opX = g.dinoMode ? 78 : 96;
+      const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
+      ctx.globalAlpha = op.alive ? 0.5 : 0.2;
+      drawCharacter(
+        ctx,
+        opX,
+        opY,
+        opW,
+        opH,
+        g.dinoMode ? false : op.powered,
+        op.bigMode,
+        g.frame,
+        op.pigColor || "pink",
+        op.character || "pig",
+      );
+      // Opponent username label
+      ctx.globalAlpha = op.alive ? 0.7 : 0.3;
+      ctx.fillStyle = op.alive ? "#fff" : "#ff9999";
+      ctx.font = "bold 10px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        op.alive ? op.username : `💀 ${op.username}`,
+        opX + opW / 2,
+        opY - 4,
+      );
+      ctx.globalAlpha = 1;
+    });
 
     // Live scoreboard panel (top-right, multiplayer only)
     if (!solo) {
@@ -686,7 +775,7 @@ export default function Game({
     const { w: bW, h: bH } = g.birdSize;
     const bx = 100;
     const by2 = H - g.birdY - bH;
-    drawPig(ctx, bx, by2, bW, bH, g.isPowered, g.bigMode, g.frame, pigColor);
+    drawCharacter(ctx, bx, by2, bW, bH, g.isPowered, g.bigMode, g.frame, pigColor, character);
 
     // Player label (grey when dead/spectating)
     ctx.fillStyle = g.over ? "rgba(255,100,100,0.8)" : "#fff";
@@ -974,6 +1063,211 @@ export default function Game({
     ctx.restore();
   }
 
+  function drawBear(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number,
+    powered: boolean, bigMode: boolean, frame: number, colorId: string = "brown",
+  ) {
+    const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["brown"];
+    const [bodyLight, bodyDark] = palette.body;
+    const strokeColor = palette.stroke;
+    ctx.save();
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+
+    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
+    bodyGrad.addColorStop(0, bodyLight);
+    bodyGrad.addColorStop(1, bodyDark);
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = w < 40 ? 1.5 : 2;
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+
+    const earR = w < 40 ? 5 : 8;
+    // Outer ears
+    ctx.fillStyle = strokeColor;
+    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2); ctx.fill();
+    // Inner ears
+    ctx.fillStyle = bodyLight;
+    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
+
+    // Snout
+    ctx.fillStyle = bodyLight;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#333";
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.75, y + h * 0.52, w < 40 ? 1.5 : 3, w < 40 ? 1 : 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye
+    ctx.fillStyle = "#2d2d2d";
+    ctx.beginPath(); ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.beginPath(); ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2); ctx.fill();
+
+    if (powered) {
+      const flapY = Math.sin(frame * 0.3) * 4;
+      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawPanda(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number,
+    powered: boolean, bigMode: boolean, frame: number, colorId: string = "white",
+  ) {
+    void colorId; // panda uses fixed white body; color ignored
+    ctx.save();
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+
+    // White body
+    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
+    bodyGrad.addColorStop(0, "#f8f8f8"); bodyGrad.addColorStop(1, "#d8d8d8");
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = "#999";
+    ctx.lineWidth = w < 40 ? 1.5 : 2;
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+
+    // Black round ears
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
+
+    // Black eye patch
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.61, y + h * 0.37, w < 40 ? 4 : 7, w < 40 ? 3.5 : 6, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // White + black eye
+    ctx.fillStyle = "white";
+    ctx.beginPath(); ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#111";
+    ctx.beginPath(); ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.beginPath(); ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2); ctx.fill();
+
+    // Snout
+    ctx.fillStyle = "#f0f0f0";
+    ctx.strokeStyle = "#bbb"; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillStyle = "#555";
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.73, y + h * 0.53, w < 40 ? 1.5 : 2.5, w < 40 ? 1 : 1.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (powered) {
+      const flapY = Math.sin(frame * 0.3) * 4;
+      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawDinoChar(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number,
+    powered: boolean, bigMode: boolean, frame: number, colorId: string = "green",
+  ) {
+    const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["green"];
+    const [bodyLight, bodyDark] = palette.body;
+    const strokeColor = palette.stroke;
+    ctx.save();
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+
+    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
+    bodyGrad.addColorStop(0, bodyLight); bodyGrad.addColorStop(1, bodyDark);
+    ctx.fillStyle = bodyGrad;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = w < 40 ? 1.5 : 2;
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+
+    // Dorsal spines
+    const spineCount = w < 40 ? 2 : 3;
+    ctx.fillStyle = strokeColor;
+    for (let i = 0; i < spineCount; i++) {
+      const sx = x + w * (0.2 + i * (0.55 / spineCount));
+      const sh = w < 40 ? 5 - i : 8 - i * 2;
+      ctx.beginPath();
+      ctx.moveTo(sx - 2, y + h * 0.12);
+      ctx.lineTo(sx, y + h * 0.12 - sh);
+      ctx.lineTo(sx + 2, y + h * 0.12);
+      ctx.closePath(); ctx.fill();
+    }
+
+    // Yellow slit eye
+    ctx.fillStyle = "#ffd700";
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 3.5 : 6, w < 40 ? 3 : 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = strokeColor; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = "#111";
+    ctx.beginPath();
+    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 1 : 2, w < 40 ? 2.5 : 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "white";
+    ctx.beginPath(); ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2); ctx.fill();
+
+    // Nostril
+    ctx.fillStyle = strokeColor;
+    ctx.beginPath(); ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2); ctx.fill();
+
+    // Tail
+    ctx.strokeStyle = strokeColor; ctx.lineWidth = w < 40 ? 2.5 : 4;
+    ctx.beginPath();
+    ctx.moveTo(x + 5, y + h * 0.5);
+    ctx.quadraticCurveTo(x - 4, y + h * 0.5, x - 8, y + h * 0.68);
+    ctx.stroke();
+
+    if (w >= 40) {
+      // Small arm
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.35, y + h * 0.55);
+      ctx.lineTo(x + w * 0.2, y + h * 0.68);
+      ctx.stroke();
+    }
+
+    if (powered) {
+      const flapY = Math.sin(frame * 0.3) * 4;
+      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCharacter(
+    ctx: CanvasRenderingContext2D,
+    x: number, y: number, w: number, h: number,
+    powered: boolean, bigMode: boolean, frame: number,
+    colorId: string, characterType: string,
+  ) {
+    switch (characterType) {
+      case "bear":  return drawBear(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "panda": return drawPanda(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "dino":  return drawDinoChar(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      default:      return drawPig(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+    }
+  }
+
   // ── GAME TICK ─────────────────────────────────────────
   const tick = useCallback(() => {
     const g = gameRef.current;
@@ -1041,16 +1335,13 @@ export default function Game({
         if (coin.collected) return false;
         coin.x -= g.pipeSpeed;
         if (coin.x < -40) return false;
-        const cx = coin.x + 14,
-          cy2 = coin.y + 14;
+        const r = coin.radius;
+        const cx = coin.x + r, cy2 = coin.y + r;
         const bCx = 100 + bW / 2,
           bCy = CONFIG.height - g.birdY - bH / 2;
-        if (
-          Math.abs(cx - bCx) < bW / 2 + 14 &&
-          Math.abs(cy2 - bCy) < bH / 2 + 14
-        ) {
+        if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
           coin.collected = true;
-          g.score++;
+          g.score += coin.value;
           setUiScore(g.score);
           playOink();
           return false;
@@ -1076,6 +1367,16 @@ export default function Game({
         }
         return true;
       });
+
+      // Sync dino position/score to multiplayer
+      if (!solo && socketRef.current) {
+        socketRef.current.emit("player_update", {
+          y: g.birdY,
+          score: g.score,
+          alive: true,
+          bigMode: g.bigMode,
+        });
+      }
 
       draw();
       return;
@@ -1153,19 +1454,35 @@ export default function Game({
       if (coin.collected) return false;
       coin.x -= g.pipeSpeed;
       if (coin.x < -40) return false;
-      const cx = coin.x + 14,
-        cy2 = coin.y + 14;
+      const r = coin.radius;
+      const cx = coin.x + r, cy2 = coin.y + r;
       const bCx = 100 + bW / 2,
         bCy = CONFIG.height - g.birdY - bH / 2;
-      if (
-        Math.abs(cx - bCx) < bW / 2 + 14 &&
-        Math.abs(cy2 - bCy) < bH / 2 + 14
-      ) {
+      if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
         coin.collected = true;
-        g.score++;
+        g.score += coin.value;
         setUiScore(g.score);
         playOink();
         return false;
+      }
+      return true;
+    });
+
+    // Poison clouds
+    g.poisons = g.poisons.filter((poison) => {
+      poison.x -= g.pipeSpeed;
+      if (poison.x + poison.r < 0) return false;
+      const bCx = 100 + bW / 2;
+      const bCy = CONFIG.height - g.birdY - bH / 2;
+      const dist = Math.sqrt((bCx - poison.x) ** 2 + (bCy - poison.y) ** 2);
+      if (dist < poison.r) {
+        poison.contactTime++;
+        if (poison.contactTime % 12 === 0) {
+          g.score = Math.max(0, g.score - 1);
+          setUiScore(g.score);
+        }
+      } else {
+        poison.contactTime = 0;
       }
       return true;
     });
@@ -1248,11 +1565,19 @@ export default function Game({
       }, 1500);
     } else if (socketRef.current) {
       socketRef.current.emit("player_died", { score: g.score });
+      // Reset velocity so the pig falls from death position
+      g.birdVelocity = 0;
       // Keep spectator loop alive so dead players can watch others
       // Also advance world state (pipes/cacti/items) so they keep scrolling
       if (g.animLoop) clearInterval(g.animLoop);
       g.animLoop = setInterval(() => {
         const sg = gameRef.current;
+        // Fall animation for dead player's pig
+        if (!sg.dinoMode) {
+          sg.birdVelocity -= 0.5;
+          sg.birdY += sg.birdVelocity;
+          if (sg.birdY < -80) sg.birdY = -80; // hold just below screen
+        }
         if (sg.dinoMode) {
           for (const c of sg.cacti) c.x -= sg.pipeSpeed;
           sg.cacti = sg.cacti.filter((c) => c.x > -60);
@@ -1269,6 +1594,8 @@ export default function Game({
             sg.pipes.shift();
             makePipe(sg.pipes[sg.pipes.length - 1].x + 600);
           }
+          for (const poison of sg.poisons) poison.x -= sg.pipeSpeed;
+          sg.poisons = sg.poisons.filter((p) => p.x + p.r > 0);
         }
         for (const coin of sg.coins) coin.x -= sg.pipeSpeed;
         sg.coins = sg.coins.filter((c) => c.x > -40);
@@ -1322,6 +1649,7 @@ export default function Game({
     g.cacti = [];
     g.coins = [];
     g.mushrooms = [];
+    g.poisons = [];
     g.dinoNextGap = 450;
     // (Re-)initialize seeded RNG so all players get identical pipe sequence
     if (g.gameSeed) g.rng = mulberry32(g.gameSeed);
@@ -1414,11 +1742,13 @@ export default function Game({
           roomId,
           username,
           pigColor,
+          character,
           speed: initialSpeed || CONFIG.baseSpeed,
         });
       }
 
       socket.on("connect", () => {
+        setSocketId(socket.id ?? "");
         joinRoom();
       });
 
@@ -1471,11 +1801,22 @@ export default function Game({
         }) => {
           if (seed !== undefined) gameRef.current.gameSeed = seed;
           if (speed !== undefined) {
-            gameRef.current.initialSpeed = speed; // store per-game, not global
+            gameRef.current.initialSpeed = speed;
           }
-          // Ignore if already playing (duplicate event guard)
           if (gameRef.current.started && !gameRef.current.over) return;
+          setResultData(null);
+          setRematchVotes(null);
+          setHasVotedRematch(false);
+          gameRef.current.deathParticles = [];
+          gameRef.current.winParticles = [];
           startCountdown(cd, startGame);
+        },
+      );
+
+      socket.on(
+        "rematch_votes",
+        ({ votes, total }: { votes: number; total: number }) => {
+          setRematchVotes({ votes, total });
         },
       );
 
@@ -1515,6 +1856,8 @@ export default function Game({
           });
           setGamePhase("waiting");
           setResultData(null);
+          setRematchVotes(null);
+          setHasVotedRematch(false);
         },
       );
 
@@ -1585,29 +1928,18 @@ export default function Game({
 
   // Solo: apply initialSpeed then start
   useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const g = gameRef.current;
     if (solo) {
-      gameRef.current.initialSpeed = initialSpeed || 3;
-      startCountdown(5, startGame);
+      g.initialSpeed = initialSpeed || 3;
+      t = setTimeout(() => startCountdown(5, startGame), 0);
     }
     return () => {
-      // Cleanup all intervals when component unmounts (handles React StrictMode double-invoke)
-      const g = gameRef.current;
-      if (g.gameLoop) {
-        clearInterval(g.gameLoop);
-        g.gameLoop = null;
-      }
-      if (g.countdownIv) {
-        clearInterval(g.countdownIv);
-        g.countdownIv = null;
-      }
-      if (g.countdownDrawIv) {
-        clearInterval(g.countdownDrawIv);
-        g.countdownDrawIv = null;
-      }
-      if (g.animLoop) {
-        clearInterval(g.animLoop);
-        g.animLoop = null;
-      }
+      if (t !== null) clearTimeout(t);
+      if (g.gameLoop) { clearInterval(g.gameLoop); g.gameLoop = null; }
+      if (g.countdownIv) { clearInterval(g.countdownIv); g.countdownIv = null; }
+      if (g.countdownDrawIv) { clearInterval(g.countdownDrawIv); g.countdownDrawIv = null; }
+      if (g.animLoop) { clearInterval(g.animLoop); g.animLoop = null; }
       g.started = false;
       g.over = false;
     };
@@ -1843,7 +2175,7 @@ export default function Game({
                       className="flex items-center gap-1 bg-white/15 px-2 py-1 rounded-full text-sm font-bold"
                       style={{
                         color:
-                          p.id === socketRef.current?.id ? "#ffd700" : "#fff",
+                          p.id === socketId ? "#ffd700" : "#fff",
                       }}
                     >
                       <span
@@ -1935,7 +2267,7 @@ export default function Game({
                   ))}
               </div>
 
-              {/* Restart actions */}
+              {/* Restart / rematch actions */}
               {solo ? (
                 <button
                   onClick={handleRestart}
@@ -1943,32 +2275,43 @@ export default function Game({
                 >
                   🔄 Main Lagi
                 </button>
-              ) : isHost ? (
-                <div className="flex flex-col items-center gap-2">
-                  <button
-                    onClick={handleRestart}
-                    className="px-8 py-3 bg-green-500 hover:bg-green-400 text-white text-lg font-bold rounded-full shadow-lg transition active:scale-95"
-                  >
-                    ▶️ Main Lagi (Host)
-                  </button>
-                  <p className="text-white/50 text-xs">
-                    Semua pemain di room akan ikut
-                  </p>
-                </div>
               ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="flex gap-1">
-                    {[0, 1, 2].map((i) => (
-                      <div
-                        key={i}
-                        className="w-2 h-2 rounded-full bg-white/60 animate-bounce"
-                        style={{ animationDelay: `${i * 0.2}s` }}
-                      />
-                    ))}
-                  </div>
-                  <p className="text-white/70 text-sm">
-                    Menunggu host memulai ulang...
-                  </p>
+                <div className="flex flex-col items-center gap-3">
+                  <button
+                    onClick={() => {
+                      if (hasVotedRematch) return;
+                      setHasVotedRematch(true);
+                      socketRef.current?.emit("vote_rematch");
+                    }}
+                    disabled={hasVotedRematch}
+                    className="px-8 py-3 bg-green-500 hover:bg-green-400 disabled:bg-green-700 disabled:cursor-not-allowed text-white text-lg font-bold rounded-full shadow-lg transition active:scale-95"
+                  >
+                    {hasVotedRematch ? "✅ Siap Rematch!" : "🔄 Rematch"}
+                  </button>
+                  {rematchVotes && (
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="flex gap-1.5">
+                        {Array.from({ length: rematchVotes.total }, (_, i) => (
+                          <div
+                            key={i}
+                            className={`w-3 h-3 rounded-full transition-colors ${
+                              i < rematchVotes.votes
+                                ? "bg-green-400"
+                                : "bg-white/25"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-white/70 text-sm">
+                        {rematchVotes.votes}/{rematchVotes.total} pemain siap
+                      </p>
+                    </div>
+                  )}
+                  {!rematchVotes && (
+                    <p className="text-white/40 text-xs">
+                      Semua pemain harus siap untuk rematch
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -1997,7 +2340,7 @@ export default function Game({
         style={{ width: CONFIG.width * canvasScale, maxWidth: "100%" }}
       >
         <span className="text-sm flex-1">
-          ⚡ Kecepatan: {gameRef.current.initialSpeed}
+          ⚡ Kecepatan: {roomSpeed}
         </span>
         {!solo && (
           <button

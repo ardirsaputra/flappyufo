@@ -19,6 +19,8 @@ const rooms = new Map();
 const lobbyPlayers = new Map();
 const chatMessages = new Map();
 const lobbyChatMessages = [];
+// username (lowercase) → socket.id — enforces single-device login
+const activeUsers = new Map();
 
 // Purge messages older than 1 hour every 5 minutes
 setInterval(
@@ -65,18 +67,51 @@ function broadcastLobby() {
   io.emit("lobby_players", Array.from(lobbyPlayers.values()));
 }
 
+function broadcastRooms() {
+  const list = Array.from(rooms.values())
+    .filter((r) => r.players.size > 0)
+    .map((r) => {
+      const hostPlayer = Array.from(r.players.values()).find((p) => p.id === r.host);
+      return {
+        id: r.id,
+        host: hostPlayer?.username || "?",
+        playerCount: r.players.size,
+        gameMode: r.gameMode || "flappy",
+        speed: r.speed,
+        hasPassword: !!r.password,
+        started: r.started,
+      };
+    });
+  io.emit("room_list", list);
+}
+
 // ── Socket handlers ────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   let currentRoom = null;
   let currentUser = null;
 
   // ── LOBBY ──────────────────────────────────────────────────────────────
-  socket.on("lobby_join", ({ username, pigColor }) => {
+  socket.on("lobby_join", ({ username, pigColor, character }) => {
+    // Single-device enforcement: kick existing session for this username
+    if (username) {
+      const key = String(username).toLowerCase();
+      const prevId = activeUsers.get(key);
+      if (prevId && prevId !== socket.id) {
+        const prevSocket = io.sockets.sockets.get(prevId);
+        if (prevSocket) {
+          prevSocket.emit("session_kicked", { reason: "Login dari perangkat lain terdeteksi." });
+          prevSocket.disconnect(true);
+        }
+      }
+      activeUsers.set(key, socket.id);
+    }
+
     currentUser = username;
     lobbyPlayers.set(socket.id, {
       id: socket.id,
       username,
       pigColor: pigColor || "pink",
+      character: character || "pig",
     });
     broadcastLobby();
     const oneHourAgo = Date.now() - 3_600_000;
@@ -109,7 +144,16 @@ io.on("connection", (socket) => {
     io.emit("lobby_chat_message", msg);
   });
 
-  socket.on("invite_player", ({ toId, roomId, speed }) => {
+  socket.on("lobby_poke", ({ toId }) => {
+    const from = lobbyPlayers.get(socket.id);
+    if (!from) return;
+    io.to(toId).emit("poke_received", {
+      fromId: socket.id,
+      fromUsername: from.username,
+    });
+  });
+
+  socket.on("invite_player", ({ toId, roomId, speed, gameMode }) => {
     const from = lobbyPlayers.get(socket.id);
     if (!from) return;
     io.to(toId).emit("invite_received", {
@@ -117,16 +161,17 @@ io.on("connection", (socket) => {
       fromUsername: from.username,
       roomId,
       speed: speed ?? 3,
+      gameMode: gameMode || "flappy",
     });
   });
 
-  socket.on("invite_accept", ({ roomId, fromId, speed }) => {
-    socket.emit("invite_go", { roomId, speed: speed ?? 3 });
-    if (fromId) io.to(fromId).emit("invite_go", { roomId, speed: speed ?? 3 });
+  socket.on("invite_accept", ({ roomId, fromId, speed, gameMode }) => {
+    socket.emit("invite_go", { roomId, speed: speed ?? 3, gameMode: gameMode || "flappy" });
+    if (fromId) io.to(fromId).emit("invite_go", { roomId, speed: speed ?? 3, gameMode: gameMode || "flappy" });
   });
 
   // ── ROOM ───────────────────────────────────────────────────────────────
-  socket.on("join_room", ({ roomId, username, pigColor, speed }) => {
+  socket.on("join_room", ({ roomId, username, pigColor, character, speed, password, gameMode }) => {
     if (currentRoom === roomId) {
       const r = rooms.get(roomId);
       if (r) {
@@ -135,6 +180,7 @@ io.on("connection", (socket) => {
           started: r.started,
           host: r.host,
           speed: r.speed,
+          gameMode: r.gameMode || "flappy",
         });
         if (r.started) {
           const elapsed = Math.floor((Date.now() - r.startTime) / 1000);
@@ -152,6 +198,7 @@ io.on("connection", (socket) => {
     currentUser = username;
 
     if (!rooms.has(roomId)) {
+      // First joiner creates the room
       rooms.set(roomId, {
         id: roomId,
         players: new Map(),
@@ -160,7 +207,20 @@ io.on("connection", (socket) => {
         startTime: 0,
         seed: 0,
         speed: speed || 3,
+        gameMode: gameMode || "flappy",
+        password: password || null,
+        resetTimeout: null,
+        gameOver: false,
+        rematchVotes: new Set(),
       });
+    } else {
+      // Validate password for existing rooms
+      const existing = rooms.get(roomId);
+      if (existing.password && existing.password !== (password || "")) {
+        currentRoom = null;
+        socket.emit("join_room_error", { error: "Password room salah" });
+        return;
+      }
     }
 
     const room = rooms.get(roomId);
@@ -176,18 +236,21 @@ io.on("connection", (socket) => {
       powered: false,
       bigMode: false,
       pigColor: pigColor || "pink",
+      character: character || "pig",
       slot: room.players.size,
     });
 
     socket.join(roomId);
     lobbyPlayers.delete(socket.id);
     broadcastLobby();
+    broadcastRooms();
 
     io.to(roomId).emit("room_state", {
       players: Array.from(room.players.values()),
       started: room.started,
       host: room.host,
       speed: room.speed,
+      gameMode: room.gameMode || "flappy",
     });
 
     if (room.started) {
@@ -288,6 +351,8 @@ io.on("connection", (socket) => {
     if (alive.length === 0) {
       const allPlayers = Array.from(room.players.values());
       const winner = allPlayers.sort((a, b) => b.score - a.score)[0];
+      room.gameOver = true;
+      room.rematchVotes.clear();
       io.to(currentRoom).emit("game_over_result", {
         winnerId: winner.id,
         winnerName: winner.username,
@@ -297,9 +362,13 @@ io.on("connection", (socket) => {
           score: p.score,
         })),
       });
-      setTimeout(() => {
+      // Fallback: auto-reset to waiting room after 60s if no rematch
+      room.resetTimeout = setTimeout(() => {
         if (!rooms.has(currentRoom)) return;
         const r = rooms.get(currentRoom);
+        r.resetTimeout = null;
+        r.gameOver = false;
+        r.rematchVotes.clear();
         r.started = false;
         r.players.forEach((p) => {
           p.alive = true;
@@ -313,14 +382,20 @@ io.on("connection", (socket) => {
           host: r.host,
           speed: r.speed,
         });
-      }, 30000);
+      }, 60000);
     }
   });
 
   socket.on("request_room_reset", () => {
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
-    if (!room || socket.id !== room.host) return;
+    if (!room || room.started || socket.id !== room.host) return;
+    if (room.resetTimeout) {
+      clearTimeout(room.resetTimeout);
+      room.resetTimeout = null;
+    }
+    room.gameOver = false;
+    room.rematchVotes.clear();
     room.started = false;
     room.players.forEach((p) => {
       p.alive = true;
@@ -336,19 +411,66 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("vote_rematch", () => {
+    if (!currentRoom) return;
+    const room = rooms.get(currentRoom);
+    if (!room || !room.gameOver) return;
+    room.rematchVotes.add(socket.id);
+    const votes = room.rematchVotes.size;
+    const total = room.players.size;
+    io.to(currentRoom).emit("rematch_votes", { votes, total });
+    if (votes >= total && total >= 2) {
+      if (room.resetTimeout) {
+        clearTimeout(room.resetTimeout);
+        room.resetTimeout = null;
+      }
+      room.gameOver = false;
+      room.rematchVotes.clear();
+      room.started = true;
+      room.startTime = Date.now();
+      room.seed = Math.floor(Math.random() * 4294967296);
+      room.players.forEach((p) => {
+        p.alive = true;
+        p.score = 0;
+        p.y = 300;
+        p.powered = false;
+        p.bigMode = false;
+      });
+      io.to(currentRoom).emit("game_start", {
+        countdown: 3,
+        seed: room.seed,
+        speed: room.speed,
+      });
+    }
+  });
+
   socket.on("disconnect", () => {
     lobbyPlayers.delete(socket.id);
+    // Remove from activeUsers only if this socket is still the registered one
+    if (currentUser) {
+      const key = String(currentUser).toLowerCase();
+      if (activeUsers.get(key) === socket.id) activeUsers.delete(key);
+    }
     broadcastLobby();
 
     if (!currentRoom) return;
     const room = rooms.get(currentRoom);
     if (!room) return;
+    room.rematchVotes.delete(socket.id);
     room.players.delete(socket.id);
     io.to(currentRoom).emit("player_left", { id: socket.id });
 
     if (room.players.size === 0) {
       rooms.delete(currentRoom);
       return;
+    }
+
+    // Broadcast updated rematch count if in rematch phase
+    if (room.gameOver) {
+      io.to(currentRoom).emit("rematch_votes", {
+        votes: room.rematchVotes.size,
+        total: room.players.size,
+      });
     }
 
     if (room.host === socket.id) {

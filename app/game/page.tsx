@@ -10,6 +10,7 @@ interface User {
   id: number;
   username: string;
   pigColor?: string;
+  character?: string;
 }
 
 function GamePageInner() {
@@ -65,8 +66,9 @@ function GamePageInner() {
         userId={user.id}
         roomId={roomId}
         solo={mode === "solo" || mode === "baby"}
-        dinoMode={mode === "baby"}
+        dinoMode={mode === "baby" || mode === "multi-dino"}
         pigColor={user.pigColor || "pink"}
+        character={user.character || "pig"}
         initialSpeed={initialSpeed}
       />
     </div>

@@ -30,16 +30,25 @@ const PIG_COLOR_ACCENT: Record<string, string> = {
   brown: "#906040",
 };
 
+const CHARACTERS = [
+  { id: "pig",   label: "Babi",     emoji: "🐷" },
+  { id: "dino",  label: "Dino",     emoji: "🦕" },
+  { id: "bear",  label: "Beruang",  emoji: "🐻" },
+  { id: "panda", label: "Panda",    emoji: "🐼" },
+];
+
 interface User {
   id: number;
   username: string;
   pigColor?: string;
+  character?: string;
 }
 
 interface OnlinePlayer {
   id: string;
   username: string;
   pigColor?: string;
+  character?: string;
 }
 
 interface InviteNotif {
@@ -47,6 +56,7 @@ interface InviteNotif {
   fromUsername: string;
   roomId: string;
   speed?: number;
+  gameMode?: "flappy" | "dino";
 }
 
 interface LobbyMsg {
@@ -60,10 +70,16 @@ interface LobbyMsg {
 export default function LobbyPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pigColor, setPigColorState] = useState("pink");
+  const [character, setCharacterState] = useState("pig");
   const [speed, setSpeed] = useState(3);
+  const [gameMode, setGameMode] = useState<"flappy" | "dino">("flappy");
+  const [joinGameMode, setJoinGameMode] = useState<"flappy" | "dino">("flappy");
   const [onlinePlayers, setOnlinePlayers] = useState<OnlinePlayer[]>([]);
   const [invite, setInvite] = useState<InviteNotif | null>(null);
   const [inviteSent, setInviteSent] = useState<Record<string, boolean>>({});
+  const [pokeNotif, setPokeNotif] = useState<string | null>(null);
+  const [pokeSent, setPokeSent] = useState<Record<string, boolean>>({});
+  const [sessionKicked, setSessionKicked] = useState(false);
 
   // Room creation flow
   const [myRoom, setMyRoom] = useState<string | null>(null);
@@ -73,6 +89,7 @@ export default function LobbyPage() {
   const [pendingRoom, setPendingRoom] = useState<{
     roomId: string;
     speed: number;
+    gameMode: string;
   } | null>(null);
 
   // Lobby chat
@@ -115,6 +132,24 @@ export default function LobbyPage() {
     socketRef.current?.emit("lobby_join", {
       username: u?.username,
       pigColor: newColor,
+      character,
+    });
+  }
+
+  function changeCharacter(newChar: string) {
+    setCharacterState(newChar);
+    const stored = localStorage.getItem("fp_user");
+    if (stored) {
+      const u = JSON.parse(stored);
+      u.character = newChar;
+      localStorage.setItem("fp_user", JSON.stringify(u));
+      setUser((prev) => (prev ? { ...prev, character: newChar } : prev));
+    }
+    const u = userRef.current;
+    socketRef.current?.emit("lobby_join", {
+      username: u?.username,
+      pigColor,
+      character: newChar,
     });
   }
 
@@ -122,8 +157,10 @@ export default function LobbyPage() {
   useEffect(() => {
     if (pendingRoom) {
       socketRef.current?.emit("lobby_leave");
+      const modeParam =
+        pendingRoom.gameMode === "dino" ? "multi-dino" : "multi";
       router.push(
-        `/game?mode=multi&room=${pendingRoom.roomId}&speed=${pendingRoom.speed}`,
+        `/game?mode=${modeParam}&room=${pendingRoom.roomId}&speed=${pendingRoom.speed}`,
       );
     }
   }, [pendingRoom, router]);
@@ -138,6 +175,7 @@ export default function LobbyPage() {
     setUser(u);
     userRef.current = u;
     setPigColorState(u.pigColor || "pink");
+    setCharacterState(u.character || "pig");
 
     let cancelled = false;
     const externalUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
@@ -160,6 +198,7 @@ export default function LobbyPage() {
         socket.emit("lobby_join", {
           username: u.username,
           pigColor: u.pigColor || "pink",
+          character: u.character || "pig",
         });
       }
 
@@ -171,10 +210,34 @@ export default function LobbyPage() {
         setOnlinePlayers(players.filter((p) => p.id !== socket.id));
       });
       socket.on("invite_received", (data: InviteNotif) => setInvite(data));
+      socket.on("poke_received", ({ fromUsername }: { fromUsername: string }) => {
+        setPokeNotif(`👉 ${fromUsername} mencolek kamu!`);
+        setTimeout(() => setPokeNotif(null), 4000);
+      });
+      socket.on("session_kicked", () => {
+        setSessionKicked(true);
+        socket.disconnect();
+        setTimeout(() => {
+          localStorage.removeItem("fp_user");
+          window.location.href = "/";
+        }, 3000);
+      });
       socket.on(
         "invite_go",
-        ({ roomId: rid, speed: spd }: { roomId: string; speed?: number }) => {
-          setPendingRoom({ roomId: rid, speed: spd ?? 3 });
+        ({
+          roomId: rid,
+          speed: spd,
+          gameMode: gm,
+        }: {
+          roomId: string;
+          speed?: number;
+          gameMode?: string;
+        }) => {
+          setPendingRoom({
+            roomId: rid,
+            speed: spd ?? 3,
+            gameMode: gm || "flappy",
+          });
         },
       );
 
@@ -214,7 +277,8 @@ export default function LobbyPage() {
   function enterRoom() {
     if (!myRoom) return;
     socketRef.current?.emit("lobby_leave");
-    router.push(`/game?mode=multi&room=${myRoom}&speed=${speed}`);
+    const modeParam = gameMode === "dino" ? "multi-dino" : "multi";
+    router.push(`/game?mode=${modeParam}&room=${myRoom}&speed=${speed}`);
   }
 
   function cancelRoom() {
@@ -224,18 +288,30 @@ export default function LobbyPage() {
   function joinRoom() {
     if (!joinId.trim()) return;
     socketRef.current?.emit("lobby_leave");
-    router.push(`/game?mode=multi&room=${joinId.trim().toUpperCase()}`);
+    const modeParam = joinGameMode === "dino" ? "multi-dino" : "multi";
+    router.push(`/game?mode=${modeParam}&room=${joinId.trim().toUpperCase()}`);
   }
 
   function invitePlayer(toId: string, _toUsername: string) {
     void _toUsername;
     if (!myRoom) return;
-    socketRef.current?.emit("invite_player", { toId, roomId: myRoom, speed });
+    socketRef.current?.emit("invite_player", {
+      toId,
+      roomId: myRoom,
+      speed,
+      gameMode,
+    });
     setInviteSent((prev) => ({ ...prev, [toId]: true }));
     setTimeout(
       () => setInviteSent((prev) => ({ ...prev, [toId]: false })),
       4000,
     );
+  }
+
+  function pokePlayer(toId: string) {
+    socketRef.current?.emit("lobby_poke", { toId });
+    setPokeSent((prev) => ({ ...prev, [toId]: true }));
+    setTimeout(() => setPokeSent((prev) => ({ ...prev, [toId]: false })), 3000);
   }
 
   function acceptInvite() {
@@ -244,6 +320,7 @@ export default function LobbyPage() {
       roomId: invite.roomId,
       fromId: invite.fromId,
       speed: invite.speed ?? 3,
+      gameMode: invite.gameMode || "flappy",
     });
     setInvite(null);
   }
@@ -263,6 +340,30 @@ export default function LobbyPage() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 p-4">
+
+      {/* Session kicked overlay */}
+      {sessionKicked && (
+        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-7 flex flex-col items-center gap-3 max-w-xs w-full text-center">
+            <div className="text-4xl">⚠️</div>
+            <p className="font-extrabold text-gray-800 text-lg">Sesi Diakhiri</p>
+            <p className="text-gray-600 text-sm">
+              Akunmu login dari perangkat lain. Kamu akan diarahkan ke halaman login...
+            </p>
+            <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div className="h-full bg-pink-500 animate-[shrink_3s_linear_forwards] rounded-full" style={{ width: "100%" }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Poke notification toast */}
+      {pokeNotif && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-yellow-400 text-gray-900 font-bold rounded-2xl shadow-2xl px-6 py-3 text-base animate-bounce">
+          {pokeNotif}
+        </div>
+      )}
+
       {/* Incoming invite toast */}
       {invite && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 w-[90vw] max-w-sm border-2 border-pink-400">
@@ -279,6 +380,9 @@ export default function LobbyPage() {
                 ⚡ Kecepatan: {invite.speed}
               </span>
             )}
+            <span className="ml-2">
+              {invite.gameMode === "dino" ? "👶 Baby Dino" : "🐷 Flappy Pig"}
+            </span>
           </p>
           <div className="flex gap-3">
             <button
@@ -305,7 +409,7 @@ export default function LobbyPage() {
               className="w-12 h-12 rounded-full border-4 border-white/60 flex items-center justify-center text-2xl"
               style={{ backgroundColor: PIG_COLOR_HEX[pigColor] }}
             >
-              🐷
+              {CHARACTERS.find((c) => c.id === character)?.emoji ?? "🐷"}
             </div>
             <div>
               <p className="text-white font-extrabold text-lg leading-none">
@@ -313,12 +417,41 @@ export default function LobbyPage() {
               </p>
               <p className="text-white/60 text-xs mt-0.5">Online</p>
             </div>
-            <button
-              onClick={logout}
-              className="ml-auto text-white/50 hover:text-white text-xs underline"
-            >
-              Keluar
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <a
+                href="/account"
+                className="text-white/50 hover:text-white text-xs underline"
+              >
+                ⚙️ Akun
+              </a>
+              <button
+                onClick={logout}
+                className="text-white/50 hover:text-white text-xs underline"
+              >
+                Keluar
+              </button>
+            </div>
+          </div>
+
+          {/* Character picker */}
+          <div className="mb-4">
+            <p className="text-white/70 text-xs mb-2">🎮 Karakter:</p>
+            <div className="grid grid-cols-4 gap-2">
+              {CHARACTERS.map((c) => (
+                <button
+                  key={c.id}
+                  onClick={() => changeCharacter(c.id)}
+                  className={`flex flex-col items-center justify-center py-2 rounded-xl text-xl transition active:scale-90 ${
+                    character === c.id
+                      ? "bg-white/40 ring-2 ring-white"
+                      : "bg-white/10 hover:bg-white/20"
+                  }`}
+                >
+                  <span>{c.emoji}</span>
+                  <span className="text-white text-xs font-bold mt-0.5">{c.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Color picker */}
@@ -362,28 +495,57 @@ export default function LobbyPage() {
               <span>Cepat</span>
             </div>
           </div>
-
-          {/* Action buttons */}
           <div className="flex flex-col gap-3">
             <button
               onClick={playSolo}
               className="py-3 bg-linear-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white text-base font-bold rounded-2xl shadow-lg transition active:scale-95"
             >
-              🎮 Main Solo
+              🎮 Main Solo Flappy Piggies
             </button>
             <button
               onClick={playBaby}
               className="py-3 bg-linear-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white text-base font-bold rounded-2xl shadow-lg transition active:scale-95"
             >
-              👶 Baby Dino Mode
+              👶 Main Solo Baby Dino
             </button>
+          </div>
+          <br />
+          {/* Multiplayer game mode toggle */}
+          <div className="mb-4">
+            <p className="text-white/70 text-xs mb-2">🎮 Mode Multiplayer:</p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setGameMode("flappy")}
+                className={`flex-1 py-2 rounded-xl font-bold text-sm transition active:scale-95 ${
+                  gameMode === "flappy"
+                    ? "bg-pink-500 text-white shadow-lg"
+                    : "bg-white/10 text-white/60 hover:bg-white/20"
+                }`}
+              >
+                🐷 Flappy Pig
+              </button>
+              <button
+                onClick={() => setGameMode("dino")}
+                className={`flex-1 py-2 rounded-xl font-bold text-sm transition active:scale-95 ${
+                  gameMode === "dino"
+                    ? "bg-purple-500 text-white shadow-lg"
+                    : "bg-white/10 text-white/60 hover:bg-white/20"
+                }`}
+              >
+                👶 Baby Dino
+              </button>
+            </div>
+          </div>
 
+          {/* Action buttons */}
+          <div className="flex flex-col gap-3">
             {!myRoom ? (
               <button
                 onClick={createRoom}
                 className="py-3 bg-linear-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white text-base font-bold rounded-2xl shadow-lg transition active:scale-95"
               >
-                🏠 Buat Room Multiplayer
+                🏠 Buat Room Multiplayer (
+                {gameMode === "dino" ? "👶 Dino" : "🐷 Flappy"})
               </button>
             ) : (
               <div className="bg-white/10 rounded-2xl p-4 border border-white/30">
@@ -428,6 +590,28 @@ export default function LobbyPage() {
               <p className="text-white/80 text-xs font-semibold mb-2">
                 🔗 Gabung dengan kode
               </p>
+              <div className="flex gap-1.5 mb-2">
+                <button
+                  onClick={() => setJoinGameMode("flappy")}
+                  className={`flex-1 py-1.5 rounded-lg font-bold text-xs transition active:scale-95 ${
+                    joinGameMode === "flappy"
+                      ? "bg-pink-500 text-white"
+                      : "bg-white/10 text-white/50 hover:bg-white/20"
+                  }`}
+                >
+                  🐷 Flappy
+                </button>
+                <button
+                  onClick={() => setJoinGameMode("dino")}
+                  className={`flex-1 py-1.5 rounded-lg font-bold text-xs transition active:scale-95 ${
+                    joinGameMode === "dino"
+                      ? "bg-purple-500 text-white"
+                      : "bg-white/10 text-white/50 hover:bg-white/20"
+                  }`}
+                >
+                  👶 Dino
+                </button>
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -491,19 +675,25 @@ export default function LobbyPage() {
                       {p.username}
                     </span>
                   </div>
-                  {myRoom ? (
+                  <div className="flex gap-1.5 shrink-0">
                     <button
-                      onClick={() => invitePlayer(p.id, p.username)}
-                      disabled={inviteSent[p.id]}
-                      className="px-3 py-1 bg-pink-500 hover:bg-pink-400 disabled:bg-pink-300 text-white text-xs font-bold rounded-lg transition active:scale-95"
+                      onClick={() => pokePlayer(p.id)}
+                      disabled={pokeSent[p.id]}
+                      className="px-2 py-1 bg-yellow-400 hover:bg-yellow-300 disabled:bg-yellow-200 text-gray-800 text-xs font-bold rounded-lg transition active:scale-95"
+                      title="Colek pemain ini"
                     >
-                      {inviteSent[p.id] ? "Terkirim ✓" : "Undang"}
+                      {pokeSent[p.id] ? "✓" : "👉 Colek"}
                     </button>
-                  ) : (
-                    <span className="text-white/30 text-xs">
-                      Buat room dulu
-                    </span>
-                  )}
+                    {myRoom && (
+                      <button
+                        onClick={() => invitePlayer(p.id, p.username)}
+                        disabled={inviteSent[p.id]}
+                        className="px-2 py-1 bg-pink-500 hover:bg-pink-400 disabled:bg-pink-300 text-white text-xs font-bold rounded-lg transition active:scale-95"
+                      >
+                        {inviteSent[p.id] ? "✓" : "Undang"}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -598,6 +788,13 @@ export default function LobbyPage() {
               </div>
             </>
           )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-center gap-4 text-xs text-white/50 pb-2">
+          <a href="/terms" className="hover:text-white underline">Kebijakan Penggunaan</a>
+          <a href="/privacy" className="hover:text-white underline">Kebijakan Privasi</a>
+          <a href="/account" className="hover:text-white underline">⚙️ Akun</a>
         </div>
       </div>
     </div>

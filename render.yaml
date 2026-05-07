@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: flappy-pig
+    env: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: NEXT_PUBLIC_SOCKET_URL
+        value: ""
+      - key: DATABASE_URL
+        fromDatabase:
+          name: flappy-pig-db
+          property: connectionString
+
+databases:
+  - name: flappy-pig-db
+    plan: free
+    databaseName: flappypig
+    user: flappypig

@@ -33,5 +33,23 @@ export async function initDB() {
       score INTEGER NOT NULL,
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS blocked_devices (
+      id SERIAL PRIMARY KEY,
+      device_id VARCHAR(64),
+      ip VARCHAR(64),
+      reason VARCHAR(256),
+      blocked_by VARCHAR(32),
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  // Safe migrations — columns added only if missing
+  await pool.query(`
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(256);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS character VARCHAR(16) DEFAULT 'pig';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS pig_color VARCHAR(16) DEFAULT 'pink';
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_device_id VARCHAR(64);
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64);
   `);
 }

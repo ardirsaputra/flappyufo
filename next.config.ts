@@ -11,9 +11,10 @@ const nextConfig: NextConfig = {
     "*.ngrok.app",
     "*.loca.lt",
     "*.trycloudflare.com",
+    "*.lhr.life",
   ],
 
-  // Allow server actions from ngrok origins
+  // Allow server actions from tunnel origins
   experimental: {
     serverActions: {
       allowedOrigins: [
@@ -22,6 +23,7 @@ const nextConfig: NextConfig = {
         "*.ngrok.app",
         "*.loca.lt",
         "*.trycloudflare.com",
+        "*.lhr.life",
       ],
     },
   },

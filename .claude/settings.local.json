@@ -10,7 +10,16 @@
       "Bash(sleep 5 && cat /tmp/server-log.txt 2>/dev/null || echo \"no log yet\")",
       "Read(//tmp/**)",
       "Bash(ssh -o StrictHostKeyChecking=no -R 80:localhost:3000 localhost.run)",
-      "Bash(jobs -l)"
+      "Bash(jobs -l)",
+      "Bash(taskkill //PID 20496 //F)",
+      "Bash(pkill -f \"node server.js\")",
+      "Bash(pkill -f \"next\")",
+      "Bash(jobs)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 10 https://88fb7e7274663b.lhr.life)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(kill 905 942)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" --max-time 10 https://70b1142544efee.lhr.life)",
+      "Bash(pkill -f \"ssh.*localhost.run\")"
     ]
   }
 }
