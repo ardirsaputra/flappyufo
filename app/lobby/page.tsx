@@ -49,6 +49,14 @@ interface InviteNotif {
   speed?: number;
 }
 
+interface LobbyMsg {
+  id: string;
+  username: string;
+  pigColor: string;
+  text: string;
+  ts: number;
+}
+
 export default function LobbyPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pigColor, setPigColorState] = useState("pink");
@@ -58,7 +66,7 @@ export default function LobbyPage() {
   const [inviteSent, setInviteSent] = useState<Record<string, boolean>>({});
 
   // Room creation flow
-  const [myRoom, setMyRoom] = useState<string | null>(null); // null = no room yet
+  const [myRoom, setMyRoom] = useState<string | null>(null);
   const [joinId, setJoinId] = useState("");
 
   // Invite accepted → navigate
@@ -67,8 +75,32 @@ export default function LobbyPage() {
     speed: number;
   } | null>(null);
 
+  // Lobby chat
+  const [lobbyChat, setLobbyChat] = useState<LobbyMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [showChat, setShowChat] = useState(false);
+  const [unreadChat, setUnreadChat] = useState(0);
+  const showChatRef = useRef(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   const socketRef = useRef<Socket | null>(null);
+  const userRef = useRef<User | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    showChatRef.current = showChat;
+    if (showChat) {
+      setUnreadChat(0);
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [showChat, lobbyChat]);
+
+  function sendChat() {
+    const text = chatInput.trim();
+    if (!text || !socketRef.current) return;
+    socketRef.current.emit("lobby_chat_send", { text });
+    setChatInput("");
+  }
 
   function changePigColor(newColor: string) {
     setPigColorState(newColor);
@@ -79,8 +111,9 @@ export default function LobbyPage() {
       localStorage.setItem("fp_user", JSON.stringify(u));
       setUser((prev) => (prev ? { ...prev, pigColor: newColor } : prev));
     }
+    const u = userRef.current;
     socketRef.current?.emit("lobby_join", {
-      username: user?.username,
+      username: u?.username,
       pigColor: newColor,
     });
   }
@@ -103,35 +136,56 @@ export default function LobbyPage() {
     }
     const u: User = JSON.parse(stored);
     setUser(u);
+    userRef.current = u;
     setPigColorState(u.pigColor || "pink");
 
     let cancelled = false;
-    fetch("/api/socketio").finally(async () => {
+    const externalUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+    const socketPath = externalUrl ? "/socket.io" : "/api/socketio";
+    const wakeup = externalUrl
+      ? Promise.resolve()
+      : fetch("/api/socketio").then(() => {});
+    wakeup.finally(async () => {
       if (cancelled) return;
       const { io } = await import("socket.io-client");
-      const socket = io({
-        path: "/api/socketio",
+      const socket = io(externalUrl || undefined, {
+        path: socketPath,
         transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 10,
       });
       socketRef.current = socket;
-      socket.on("connect", () => {
+
+      function doLobbyJoin() {
         socket.emit("lobby_join", {
           username: u.username,
           pigColor: u.pigColor || "pink",
         });
-      });
+      }
+
+      socket.on("connect", () => doLobbyJoin());
+      // Rejoin lobby after reconnect so the player list stays accurate
+      socket.on("reconnect", () => doLobbyJoin());
+
       socket.on("lobby_players", (players: OnlinePlayer[]) => {
         setOnlinePlayers(players.filter((p) => p.id !== socket.id));
       });
-      socket.on("invite_received", (data: InviteNotif) => {
-        setInvite(data);
-      });
+      socket.on("invite_received", (data: InviteNotif) => setInvite(data));
       socket.on(
         "invite_go",
         ({ roomId: rid, speed: spd }: { roomId: string; speed?: number }) => {
           setPendingRoom({ roomId: rid, speed: spd ?? 3 });
         },
       );
+
+      // Lobby chat
+      socket.on("lobby_chat_message", (msg: LobbyMsg) => {
+        setLobbyChat((prev) => [...prev, msg].slice(-100));
+        setUnreadChat((n) => (showChatRef.current ? 0 : n + 1));
+      });
+      socket.on("lobby_chat_history", (msgs: LobbyMsg[]) => {
+        setLobbyChat(msgs.slice(-100));
+      });
     });
 
     return () => {
@@ -145,6 +199,11 @@ export default function LobbyPage() {
   function playSolo() {
     socketRef.current?.emit("lobby_leave");
     router.push(`/game?mode=solo&speed=${speed}`);
+  }
+
+  function playBaby() {
+    socketRef.current?.emit("lobby_leave");
+    router.push(`/game?mode=baby&speed=${speed}`);
   }
 
   function createRoom() {
@@ -168,7 +227,8 @@ export default function LobbyPage() {
     router.push(`/game?mode=multi&room=${joinId.trim().toUpperCase()}`);
   }
 
-  function invitePlayer(toId: string, toUsername: string) {
+  function invitePlayer(toId: string, _toUsername: string) {
+    void _toUsername;
     if (!myRoom) return;
     socketRef.current?.emit("invite_player", { toId, roomId: myRoom, speed });
     setInviteSent((prev) => ({ ...prev, [toId]: true }));
@@ -205,7 +265,7 @@ export default function LobbyPage() {
     <div className="min-h-screen flex flex-col items-center justify-center bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 p-4">
       {/* Incoming invite toast */}
       {invite && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 min-w-72 border-2 border-pink-400">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-white rounded-2xl shadow-2xl p-5 flex flex-col items-center gap-3 w-[90vw] max-w-sm border-2 border-pink-400">
           <div className="text-3xl">🎮</div>
           <p className="font-bold text-gray-800 text-center">
             <span className="text-pink-600">{invite.fromUsername}</span>{" "}
@@ -282,7 +342,7 @@ export default function LobbyPage() {
             </div>
           </div>
 
-          {/* Speed slider (always visible, used for both solo and room) */}
+          {/* Speed slider */}
           <div className="mb-4">
             <p className="text-white/70 text-xs mb-1">
               ⚡ Kecepatan awal:{" "}
@@ -311,6 +371,12 @@ export default function LobbyPage() {
             >
               🎮 Main Solo
             </button>
+            <button
+              onClick={playBaby}
+              className="py-3 bg-linear-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white text-base font-bold rounded-2xl shadow-lg transition active:scale-95"
+            >
+              👶 Baby Dino Mode
+            </button>
 
             {!myRoom ? (
               <button
@@ -320,7 +386,6 @@ export default function LobbyPage() {
                 🏠 Buat Room Multiplayer
               </button>
             ) : (
-              /* Room created — show room panel */
               <div className="bg-white/10 rounded-2xl p-4 border border-white/30">
                 <div className="flex items-center justify-between mb-3">
                   <p className="text-white font-bold text-sm">
@@ -347,8 +412,7 @@ export default function LobbyPage() {
                   </button>
                 </div>
                 <p className="text-white/60 text-xs mb-3">
-                  Undang pemain di bawah atau bagikan kode room. Kamu bisa masuk
-                  kapan saja — game baru mulai saat kamu tekan ▶️ di dalam room.
+                  Undang pemain di bawah atau bagikan kode room.
                 </p>
                 <button
                   onClick={enterRoom}
@@ -408,7 +472,7 @@ export default function LobbyPage() {
               Belum ada pemain lain di lobby...
             </p>
           ) : (
-            <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
               {onlinePlayers.map((p) => (
                 <div
                   key={p.id}
@@ -427,7 +491,6 @@ export default function LobbyPage() {
                       {p.username}
                     </span>
                   </div>
-
                   {myRoom ? (
                     <button
                       onClick={() => invitePlayer(p.id, p.username)}
@@ -444,6 +507,96 @@ export default function LobbyPage() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* Lobby Chat */}
+        <div className="bg-white/20 backdrop-blur-md rounded-3xl shadow-2xl overflow-hidden">
+          <button
+            onClick={() =>
+              setShowChat((v) => {
+                if (!v) setUnreadChat(0);
+                return !v;
+              })
+            }
+            className="w-full flex items-center gap-2 px-5 py-4 text-left"
+          >
+            <span className="text-base font-bold text-white flex-1">
+              💬 Chat Lobby
+            </span>
+            {unreadChat > 0 && !showChat && (
+              <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                {unreadChat > 9 ? "9+" : unreadChat} baru
+              </span>
+            )}
+            <span className="text-white/50 text-sm">
+              {showChat ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {showChat && (
+            <>
+              {/* Messages */}
+              <div className="px-4 pb-2 max-h-52 overflow-y-auto space-y-1.5">
+                {lobbyChat.length === 0 ? (
+                  <p className="text-white/40 text-xs text-center py-4">
+                    Belum ada pesan. Sapa semua orang!
+                  </p>
+                ) : (
+                  lobbyChat.map((msg) => (
+                    <div
+                      key={msg.id}
+                      className="flex items-start gap-1.5 text-sm"
+                    >
+                      <span
+                        className="mt-0.5 shrink-0 inline-block w-2.5 h-2.5 rounded-full border border-white/30"
+                        style={{
+                          backgroundColor:
+                            PIG_COLOR_HEX[msg.pigColor] || "#ffc8d8",
+                        }}
+                      />
+                      <span
+                        className="font-bold shrink-0"
+                        style={{
+                          color:
+                            msg.username === user.username ? "#ffd700" : "#fff",
+                        }}
+                      >
+                        {msg.username}:
+                      </span>
+                      <span className="text-white/90 wrap-break-word min-w-0">
+                        {msg.text}
+                      </span>
+                    </div>
+                  ))
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              {/* Input */}
+              <div className="flex gap-2 px-4 py-3 border-t border-white/20 bg-black/10">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      sendChat();
+                    }
+                  }}
+                  placeholder="Ketik pesan..."
+                  maxLength={200}
+                  className="flex-1 bg-white/20 text-white placeholder-white/40 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-pink-300 min-w-0"
+                />
+                <button
+                  onClick={sendChat}
+                  disabled={!chatInput.trim()}
+                  className="px-4 py-2 bg-pink-500 hover:bg-pink-400 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition active:scale-95 shrink-0"
+                >
+                  Kirim
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>

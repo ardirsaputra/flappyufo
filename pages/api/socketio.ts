@@ -1,14 +1,9 @@
-import type { NextApiRequest } from "next";
-import { initSocket, NextApiResponseWithSocket } from "@/lib/socket";
+import type { NextApiRequest, NextApiResponse } from "next";
 
+// Socket.IO is initialized by the custom server (server.js).
+// This endpoint exists only as a wakeup ping for the frontend.
 export const config = { api: { bodyParser: false } };
 
-export default function handler(
-  req: NextApiRequest,
-  res: NextApiResponseWithSocket,
-) {
-  if (!res.socket.server.io) {
-    res.socket.server.io = initSocket(res.socket.server);
-  }
-  res.end();
+export default function handler(_req: NextApiRequest, res: NextApiResponse) {
+  res.status(200).end();
 }

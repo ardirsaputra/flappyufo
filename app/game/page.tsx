@@ -16,9 +16,9 @@ function GamePageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
-  const mode = searchParams.get("mode") || "solo";
-  const roomId = searchParams.get("room") || "solo-room";
-  const initialSpeed = parseFloat(searchParams.get("speed") || "3");
+  const mode = searchParams?.get("mode") || "solo";
+  const roomId = searchParams?.get("room") || "solo-room";
+  const initialSpeed = parseFloat(searchParams?.get("speed") || "3");
 
   useEffect(() => {
     const stored = localStorage.getItem("fp_user");
@@ -39,32 +39,33 @@ function GamePageInner() {
     );
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 p-4">
-      <div className="mb-3 flex items-center gap-4">
+    <div className="min-h-screen flex flex-col items-center justify-start bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 pt-2 pb-4 px-2">
+      <div className="mb-2 flex items-center gap-3 w-full max-w-[800px]">
         <a
           href="/lobby"
-          className="text-white/70 hover:text-white text-sm underline"
+          className="text-white/70 hover:text-white text-sm underline shrink-0"
         >
           ← Lobby
         </a>
-        <span className="text-white font-bold text-lg">🐷 Ahhhh BABIIII</span>
+        <span className="text-white font-bold text-base flex-1 text-center truncate">🐷 Ahhhh BABIIII</span>
         {mode === "multi" && (
-          <span className="bg-white/20 text-yellow-200 text-sm font-mono font-bold px-3 py-1 rounded-full">
-            Room: {roomId}
+          <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0 max-w-[100px] truncate">
+            {roomId}
           </span>
         )}
         <a
           href="/leaderboard"
-          className="text-white/70 hover:text-white text-sm underline"
+          className="text-white/70 hover:text-white text-sm underline shrink-0"
         >
-          🏆 Board
+          🏆
         </a>
       </div>
       <Game
         username={user.username}
         userId={user.id}
         roomId={roomId}
-        solo={mode === "solo"}
+        solo={mode === "solo" || mode === "baby"}
+        dinoMode={mode === "baby"}
         pigColor={user.pigColor || "pink"}
         initialSpeed={initialSpeed}
       />

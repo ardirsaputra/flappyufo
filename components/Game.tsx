@@ -19,6 +19,7 @@ interface GameProps {
   userId: number;
   roomId: string;
   solo: boolean;
+  dinoMode?: boolean;
   pigColor?: string;
   initialSpeed?: number;
 }
@@ -76,6 +77,7 @@ export default function Game({
   userId,
   roomId,
   solo,
+  dinoMode = false,
   pigColor = "pink",
   initialSpeed,
 }: GameProps) {
@@ -86,7 +88,13 @@ export default function Game({
     score: 0,
     birdY: 200,
     birdVelocity: 0,
-    birdSize: { w: 54, h: 46 },
+    birdSize: dinoMode ? { w: 30, h: 30 } : { w: 54, h: 46 },
+    dinoMode: dinoMode,
+    dinoGroundY: 20, // birdY when pig stands on ground (pig bottom = H - 20 = groundTop)
+    dinoNextGap: 450, // pixels from right edge before spawning next cactus
+    dinoVelocity: 0,
+    dinoIsJumping: false,
+    cacti: [] as { x: number; height: number; passed: boolean }[], // for dino mode
     isPowered: false,
     bigMode: false,
     bigTimer: null as ReturnType<typeof setTimeout> | null,
@@ -153,6 +161,48 @@ export default function Game({
     myWon: boolean;
     scores: { username: string; score: number }[];
   } | null>(null);
+
+  // Canvas responsive scaling
+  const [canvasScale, setCanvasScale] = useState(1);
+  useEffect(() => {
+    function updateScale() {
+      const maxW = window.innerWidth - 16;
+      const maxH = window.innerHeight - 160;
+      const s = Math.min(1, maxW / CONFIG.width, maxH / CONFIG.height);
+      setCanvasScale(Math.max(0.3, s));
+    }
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, []);
+
+  // Chat
+  interface ChatMsg {
+    id: string;
+    username: string;
+    pigColor: string;
+    text: string;
+    ts: number;
+  }
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [showChat, setShowChat] = useState(false);
+  const showChatRef = useRef(false); // ref for stale-closure-safe access in socket handlers
+  const [unreadChat, setUnreadChat] = useState(0);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    showChatRef.current = showChat;
+    if (showChat) {
+      setUnreadChat(0);
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, showChat]);
+  function sendChat() {
+    const text = chatInput.trim();
+    if (!text || !socketRef.current) return;
+    socketRef.current.emit("chat_send", { text });
+    setChatInput("");
+  }
 
   // Audio
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -317,19 +367,40 @@ export default function Game({
     for (let i = 0; i < 5; i++) makePipe(800 + i * 600);
   }
 
-  // Activate mushroom — grants 5 seconds of immunity (pig grows, all pipe hits ignored)
+  // Activate mushroom — grants 5 seconds of immunity
   function activateMushroom() {
     const g = gameRef.current;
     g.bigMode = true;
-    g.birdSize = { w: 72, h: 62 };
+    if (!g.dinoMode) g.birdSize = { w: 72, h: 62 }; // only grow in flappy mode
     playPowerUp();
-    // Clear any existing timer then set 5-second immunity
     if (g.bigTimer) clearTimeout(g.bigTimer);
     g.bigTimer = setTimeout(() => {
       g.bigMode = false;
-      g.birdSize = { w: 54, h: 46 };
+      if (!g.dinoMode) g.birdSize = { w: 54, h: 46 };
       g.bigTimer = null;
     }, 5000);
+  }
+
+  // Dino-mode item spawners
+  function spawnDinoCoins(cactusX: number) {
+    const count = 2 + Math.floor(Math.random() * 3);
+    const baseX = cactusX - 260;
+    for (let i = 0; i < count; i++) {
+      const coinBirdY = 30 + Math.floor(Math.random() * 130);
+      gameRef.current.coins.push({
+        x: baseX + i * 55,
+        y: CONFIG.height - coinBirdY - 14,
+        collected: false,
+        animT: 0,
+      });
+    }
+  }
+  function spawnDinoMushroom(cactusX: number) {
+    gameRef.current.mushrooms.push({
+      x: cactusX - 280,
+      y: CONFIG.height - 20 - 36,
+      collected: false,
+    });
   }
 
   function activatePower() {
@@ -416,41 +487,65 @@ export default function Game({
       ctx.fill();
     });
 
-    // Pipes
-    g.pipes.forEach((pipe) => {
-      const wiggle = g.pipesWiggling ? Math.sin(g.frame * 0.3) * 5 : 0;
-      const px = pipe.x + wiggle;
-      if (pipe.crushed) {
-        ctx.globalAlpha = 0.4;
-        ctx.filter = "brightness(3) saturate(0)";
-      }
-      // Pipe color
-      const pGrad = ctx.createLinearGradient(px, 0, px + 60, 0);
-      pGrad.addColorStop(0, "#a0522d");
-      pGrad.addColorStop(0.5, "#cd853f");
-      pGrad.addColorStop(1, "#a0522d");
-      ctx.fillStyle = pGrad;
-      ctx.strokeStyle = "#7a3e1e";
-      ctx.lineWidth = 3;
+    if (g.dinoMode) {
+      // Ground
+      ctx.fillStyle = "#deb887";
+      ctx.fillRect(0, H - 20, W, 20);
+      ctx.strokeStyle = "#8b4513";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(0, H - 20, W, 20);
 
-      // Top pipe
-      ctx.fillRect(px, 0, 60, pipe.topH);
-      ctx.strokeRect(px, 0, 60, pipe.topH);
-      ctx.fillRect(px - 5, pipe.topH - 20, 70, 20);
-      ctx.strokeRect(px - 5, pipe.topH - 20, 70, 20);
+      // Cacti
+      g.cacti.forEach((cactus) => {
+        ctx.fillStyle = "#228b22";
+        ctx.fillRect(cactus.x, H - cactus.height, 20, cactus.height);
+        ctx.strokeStyle = "#006400";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(cactus.x, H - cactus.height, 20, cactus.height);
+        // Spikes
+        ctx.fillStyle = "#32cd32";
+        for (let i = 0; i < 3; i++) {
+          ctx.fillRect(cactus.x + i * 6, H - cactus.height - 5, 4, 5);
+        }
+      });
 
-      // Bottom pipe
-      const by = H - pipe.bottomH;
-      ctx.fillRect(px, by, 60, pipe.bottomH);
-      ctx.strokeRect(px, by, 60, pipe.bottomH);
-      ctx.fillRect(px - 5, by, 70, 20);
-      ctx.strokeRect(px - 5, by, 70, 20);
+      // Skip pipes, coins, mushrooms for dino mode
+    } else {
+      // Pipes
+      g.pipes.forEach((pipe) => {
+        const px = pipe.x;
+        if (pipe.crushed) {
+          ctx.globalAlpha = 0.4;
+          ctx.filter = "brightness(3) saturate(0)";
+        }
+        // Pipe color
+        const pGrad = ctx.createLinearGradient(px, 0, px + 60, 0);
+        pGrad.addColorStop(0, "#a0522d");
+        pGrad.addColorStop(0.5, "#cd853f");
+        pGrad.addColorStop(1, "#a0522d");
+        ctx.fillStyle = pGrad;
+        ctx.strokeStyle = "#7a3e1e";
+        ctx.lineWidth = 3;
 
-      ctx.globalAlpha = 1;
-      ctx.filter = "none";
-    });
+        // Top pipe
+        ctx.fillRect(px, 0, 60, pipe.topH);
+        ctx.strokeRect(px, 0, 60, pipe.topH);
+        ctx.fillRect(px - 5, pipe.topH - 20, 70, 20);
+        ctx.strokeRect(px - 5, pipe.topH - 20, 70, 20);
 
-    // Coins
+        // Bottom pipe
+        const by = H - pipe.bottomH;
+        ctx.fillRect(px, by, 60, pipe.bottomH);
+        ctx.strokeRect(px, by, 60, pipe.bottomH);
+        ctx.fillRect(px - 5, by, 70, 20);
+        ctx.strokeRect(px - 5, by, 70, 20);
+
+        ctx.globalAlpha = 1;
+        ctx.filter = "none";
+      });
+    } // end else for pipes
+
+    // Coins (both flappy and dino modes)
     g.coins.forEach((coin) => {
       if (coin.collected) return;
       coin.animT += 0.06;
@@ -472,18 +567,16 @@ export default function Game({
       ctx.restore();
     });
 
-    // Mushrooms
+    // Mushrooms (both flappy and dino modes)
     g.mushrooms.forEach((m) => {
       if (m.collected) return;
       const bob = Math.sin(g.frame * 0.08) * 6;
       ctx.save();
       ctx.translate(m.x, m.y + bob);
-      // Cap
       ctx.fillStyle = "#e03030";
       ctx.beginPath();
       ctx.ellipse(18, 12, 18, 13, 0, 0, Math.PI * 2);
       ctx.fill();
-      // Spots
       ctx.fillStyle = "white";
       [
         [8, 6, 3],
@@ -494,7 +587,6 @@ export default function Game({
         ctx.arc(sx, sy, sr, 0, Math.PI * 2);
         ctx.fill();
       });
-      // Stem
       ctx.fillStyle = "#ffecd2";
       ctx.strokeStyle = "#d4a574";
       ctx.lineWidth = 1.5;
@@ -503,52 +595,92 @@ export default function Game({
       ctx.restore();
     });
 
-    // Opponents — clustered near player (each 80px to the right), so they share the same game space
-    let opIdx = 0;
-    g.opponents.forEach((op) => {
-      const opW = op.bigMode ? 72 : 54;
-      const opH = op.bigMode ? 62 : 46;
-      const opX = 100 + 130 + opIdx * 80;
-      const opY = H - op.y - opH;
-      opIdx++;
-
-      drawPig(
-        ctx,
-        opX,
-        opY,
-        opW,
-        opH,
-        op.powered,
-        op.bigMode,
-        g.frame,
-        op.pigColor || "pink",
-      );
-
-      if (!op.alive) {
-        ctx.globalAlpha = 0.4;
-        ctx.fillStyle = "#000";
-        ctx.fillRect(opX, opY, opW, opH);
+    // Opponents: ghost pigs at their actual Y positions (scales to any player count)
+    if (!g.dinoMode) {
+      g.opponents.forEach((op) => {
+        const opW = op.bigMode ? 52 : 40;
+        const opH = op.bigMode ? 44 : 34;
+        const opX = 96;
+        const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
+        ctx.globalAlpha = op.alive ? 0.5 : 0.2;
+        drawPig(
+          ctx,
+          opX,
+          opY,
+          opW,
+          opH,
+          op.powered,
+          op.bigMode,
+          g.frame,
+          op.pigColor || "pink",
+        );
         ctx.globalAlpha = 1;
-        ctx.fillStyle = "#ff4444";
-        ctx.font = "bold 11px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText("💀 " + op.username, opX + opW / 2, opY - 6);
-      } else {
-        ctx.fillStyle = "#fff";
-        ctx.font = "bold 11px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(op.username, opX + opW / 2, opY - 6);
-      }
+      });
+    }
 
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
+    // Live scoreboard panel (top-right, multiplayer only)
+    if (!solo) {
+      const allPlayers: {
+        username: string;
+        score: number;
+        alive: boolean;
+        isMe: boolean;
+        color: string;
+      }[] = [
+        {
+          username,
+          score: g.score,
+          alive: !g.over,
+          isMe: true,
+          color: pigColor,
+        },
+        ...Array.from(g.opponents.values()).map((op) => ({
+          username: op.username,
+          score: op.score,
+          alive: op.alive,
+          isMe: false,
+          color: op.pigColor || "pink",
+        })),
+      ].sort((a, b) => b.score - a.score);
+
+      const maxRows = Math.min(allPlayers.length, 8);
+      const sbW = 155,
+        sbH = 20 + maxRows * 20;
+      const sbX = W - sbW - 6,
+        sbY = 6;
+      ctx.fillStyle = "rgba(0,0,0,0.55)";
       ctx.beginPath();
-      ctx.roundRect(opX, opY + opH + 2, opW, 16, 4);
+      ctx.roundRect(sbX, sbY, sbW, sbH, 8);
       ctx.fill();
+
       ctx.fillStyle = "#ffd700";
-      ctx.font = "bold 11px Arial";
+      ctx.font = "bold 10px Arial";
       ctx.textAlign = "center";
-      ctx.fillText(`${op.score}`, opX + opW / 2, opY + opH + 13);
-    });
+      ctx.fillText("🏆 Scoreboard", sbX + sbW / 2, sbY + 13);
+
+      allPlayers.slice(0, 8).forEach((p, i) => {
+        const py = sbY + 20 + i * 20;
+        const colorHex = PIG_COLOR_HEX[p.color] || "#ffc8d8";
+        ctx.fillStyle = colorHex;
+        ctx.beginPath();
+        ctx.arc(sbX + 12, py + 7, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.4)";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.fillStyle = p.isMe ? "#ffd700" : p.alive ? "#ffffff" : "#ff9999";
+        ctx.font = `${p.isMe ? "bold " : ""}10px Arial`;
+        ctx.textAlign = "left";
+        ctx.fillText(
+          `${i + 1}. ${p.username.substring(0, 10)}`,
+          sbX + 20,
+          py + 10,
+        );
+        ctx.fillStyle = p.alive ? "#aaffaa" : "#ff9999";
+        ctx.textAlign = "right";
+        ctx.fillText(String(p.score), sbX + sbW - 6, py + 10);
+      });
+    }
 
     // Player pig
     const { w: bW, h: bH } = g.birdSize;
@@ -556,11 +688,11 @@ export default function Game({
     const by2 = H - g.birdY - bH;
     drawPig(ctx, bx, by2, bW, bH, g.isPowered, g.bigMode, g.frame, pigColor);
 
-    // Player label
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 11px Arial";
+    // Player label (grey when dead/spectating)
+    ctx.fillStyle = g.over ? "rgba(255,100,100,0.8)" : "#fff";
+    ctx.font = `bold 11px Arial`;
     ctx.textAlign = "center";
-    ctx.fillText(username, bx + bW / 2, by2 - 6);
+    ctx.fillText(g.over ? `💀 ${username}` : username, bx + bW / 2, by2 - 6);
 
     // Death particles
     g.deathParticles = g.deathParticles.filter((p) => {
@@ -591,11 +723,13 @@ export default function Game({
       return true;
     });
 
-    // Ground
-    ctx.fillStyle = "#8b4513";
-    ctx.fillRect(0, H - 20, W, 20);
-    ctx.fillStyle = "#654321";
-    ctx.fillRect(0, H - 20, W, 4);
+    // Ground (flappy mode only — dino mode draws its own ground earlier)
+    if (!g.dinoMode) {
+      ctx.fillStyle = "#8b4513";
+      ctx.fillRect(0, H - 20, W, 20);
+      ctx.fillStyle = "#654321";
+      ctx.fillRect(0, H - 20, W, 4);
+    }
 
     // Score HUD
     ctx.fillStyle = "white";
@@ -607,17 +741,47 @@ export default function Game({
     ctx.shadowBlur = 0;
 
     // Power indicator
-    if (g.bigMode) {
-      ctx.fillStyle = "#ff69b4";
-      ctx.font = "bold 16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("🛡️ NYAWA EKSTRA! (tahan 1 pipa)", W / 2, 85);
-    }
-    if (g.isPowered) {
-      ctx.fillStyle = "#ffd700";
-      ctx.font = "bold 16px Arial";
-      ctx.textAlign = "center";
-      ctx.fillText("⚡ POWER UP!", W / 2, g.bigMode ? 105 : 85);
+    if (g.dinoMode) {
+      if (g.bigMode) {
+        // Pulsing shield ring around pig
+        const pulse = 0.45 + 0.45 * Math.abs(Math.sin(g.frame * 0.18));
+        ctx.globalAlpha = pulse;
+        ctx.strokeStyle = "#ff69b4";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.ellipse(
+          100 + bW / 2,
+          H - g.birdY - bH / 2,
+          bW / 2 + 10,
+          bH / 2 + 10,
+          0,
+          0,
+          Math.PI * 2,
+        );
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        // Text
+        ctx.fillStyle = "#ff69b4";
+        ctx.font = "bold 15px Arial";
+        ctx.textAlign = "center";
+        ctx.shadowColor = "rgba(255,105,180,0.7)";
+        ctx.shadowBlur = 8;
+        ctx.fillText("🍄 IMUN KAKTUS!", W / 2, 85);
+        ctx.shadowBlur = 0;
+      }
+    } else {
+      if (g.bigMode) {
+        ctx.fillStyle = "#ff69b4";
+        ctx.font = "bold 16px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("🛡️ NYAWA EKSTRA! (tahan 1 pipa)", W / 2, 85);
+      }
+      if (g.isPowered) {
+        ctx.fillStyle = "#ffd700";
+        ctx.font = "bold 16px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText("⚡ POWER UP!", W / 2, g.bigMode ? 105 : 85);
+      }
     }
 
     // Solo countdown overlay (multiplayer uses HTML overlay instead)
@@ -647,6 +811,84 @@ export default function Game({
     frame: number,
     colorId: string = "pink",
   ) {
+    if (w < 40) {
+      // Baby pig
+      const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["pink"];
+      const [bodyLight, bodyDark] = palette.body;
+      const strokeColor = palette.stroke;
+
+      ctx.save();
+      if (powered) {
+        ctx.shadowColor = "#ffd700";
+        ctx.shadowBlur = 20;
+      }
+      if (bigMode) {
+        ctx.shadowColor = "#ff69b4";
+        ctx.shadowBlur = 22;
+      }
+
+      // Body - more round
+      const bodyGrad = ctx.createRadialGradient(
+        x + w * 0.4,
+        y + h * 0.4,
+        2,
+        x + w / 2,
+        y + h / 2,
+        w * 0.7,
+      );
+      bodyGrad.addColorStop(0, bodyLight);
+      bodyGrad.addColorStop(1, bodyDark);
+      ctx.fillStyle = bodyGrad;
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Small ears
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.ellipse(x + w * 0.25, y + 3, 4, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(x + w * 0.55, y + 3, 4, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Small snout
+      ctx.fillStyle = strokeColor;
+      ctx.beginPath();
+      ctx.ellipse(x + w - 5, y + h * 0.55, 6, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(130,40,60,0.3)";
+      ctx.beginPath();
+      ctx.arc(x + w - 7, y + h * 0.58, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + w - 3, y + h * 0.58, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Eye
+      ctx.fillStyle = "#2d2d2d";
+      ctx.beginPath();
+      ctx.arc(x + w * 0.62, y + h * 0.38, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "white";
+      ctx.beginPath();
+      ctx.arc(x + w * 0.64, y + h * 0.36, 1, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tail
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x + 2, y + h * 0.6, 3, Math.PI * 0.5, Math.PI * 1.5);
+      ctx.stroke();
+
+      ctx.restore();
+      return;
+    }
+
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["pink"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
@@ -736,6 +978,108 @@ export default function Game({
   const tick = useCallback(() => {
     const g = gameRef.current;
     if (!g.started || g.over) return;
+
+    if (g.dinoMode) {
+      // ── Dino physics (flappy coords: higher birdY = visually higher on screen) ──
+      // Gravity is negative here because decreasing birdY moves pig DOWN visually
+      const gravity = -0.65;
+      g.dinoVelocity += gravity;
+      g.birdY += g.dinoVelocity;
+
+      // Clamp to ground
+      if (g.birdY <= g.dinoGroundY) {
+        g.birdY = g.dinoGroundY;
+        g.dinoVelocity = 0;
+        g.dinoIsJumping = false;
+      }
+
+      // Move & cleanup cacti
+      for (const c of g.cacti) c.x -= g.pipeSpeed;
+      g.cacti = g.cacti.filter((c) => c.x > -60);
+
+      // Spawn next cactus when last one scrolled past the gap threshold
+      const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
+      if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
+        const height = 44 + Math.floor(Math.random() * 40);
+        g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
+        g.dinoNextGap = 300 + Math.random() * 270;
+        spawnDinoCoins(CONFIG.width + 60);
+        if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
+      }
+
+      // Collision check + cactus-passed scoring
+      const bW = g.birdSize.w;
+      const bH = g.birdSize.h;
+      const birdLeft = 100,
+        birdRight = 100 + bW;
+      let hitCactus = false;
+      for (const cactus of g.cacti) {
+        if (
+          birdRight > cactus.x + 4 &&
+          birdLeft < cactus.x + 16 &&
+          g.birdY < cactus.height - 6
+        ) {
+          hitCactus = true;
+          break;
+        }
+        if (!cactus.passed && cactus.x + 20 < birdLeft) {
+          cactus.passed = true;
+          g.score++;
+          g.pipesPassedCount++;
+          setUiScore(g.score);
+          if (g.pipesPassedCount % 5 === 0)
+            g.pipeSpeed = Math.min(g.pipeSpeed + 0.3, 14);
+        }
+      }
+      if (hitCactus && !g.bigMode) {
+        endGame();
+        return;
+      }
+
+      // Coin collection (dino mode)
+      g.coins = g.coins.filter((coin) => {
+        if (coin.collected) return false;
+        coin.x -= g.pipeSpeed;
+        if (coin.x < -40) return false;
+        const cx = coin.x + 14,
+          cy2 = coin.y + 14;
+        const bCx = 100 + bW / 2,
+          bCy = CONFIG.height - g.birdY - bH / 2;
+        if (
+          Math.abs(cx - bCx) < bW / 2 + 14 &&
+          Math.abs(cy2 - bCy) < bH / 2 + 14
+        ) {
+          coin.collected = true;
+          g.score++;
+          setUiScore(g.score);
+          playOink();
+          return false;
+        }
+        return true;
+      });
+
+      // Mushroom collection (dino mode)
+      g.mushrooms = g.mushrooms.filter((m) => {
+        m.x -= g.pipeSpeed;
+        if (m.x < -60) return false;
+        const mx = m.x + 18,
+          my = m.y + 18;
+        const bCx = 100 + bW / 2,
+          bCy = CONFIG.height - g.birdY - bH / 2;
+        if (
+          Math.abs(mx - bCx) < bW / 2 + 18 &&
+          Math.abs(my - bCy) < bH / 2 + 18
+        ) {
+          m.collected = true;
+          activateMushroom();
+          return false;
+        }
+        return true;
+      });
+
+      draw();
+      return;
+    }
 
     const gravity = -0.5;
     const jumpStrength = 9;
@@ -870,7 +1214,7 @@ export default function Game({
     if (g.bigTimer) clearTimeout(g.bigTimer);
     g.isPowered = false;
     g.bigMode = false;
-    g.birdSize = { w: 54, h: 46 };
+    g.birdSize = g.dinoMode ? { w: 30, h: 30 } : { w: 54, h: 46 };
 
     // Spawn death particles at pig position
     const bx = 100 + g.birdSize.w / 2;
@@ -904,14 +1248,34 @@ export default function Game({
       }, 1500);
     } else if (socketRef.current) {
       socketRef.current.emit("player_died", { score: g.score });
-      // Animate particles
-      g.animLoop = setInterval(() => draw(), 20);
-      setTimeout(() => {
-        if (g.animLoop) {
-          clearInterval(g.animLoop);
-          g.animLoop = null;
+      // Keep spectator loop alive so dead players can watch others
+      // Also advance world state (pipes/cacti/items) so they keep scrolling
+      if (g.animLoop) clearInterval(g.animLoop);
+      g.animLoop = setInterval(() => {
+        const sg = gameRef.current;
+        if (sg.dinoMode) {
+          for (const c of sg.cacti) c.x -= sg.pipeSpeed;
+          sg.cacti = sg.cacti.filter((c) => c.x > -60);
+          const lastC =
+            sg.cacti.length > 0 ? sg.cacti[sg.cacti.length - 1] : null;
+          if (!lastC || lastC.x < CONFIG.width - sg.dinoNextGap) {
+            const height = 44 + Math.floor(Math.random() * 40);
+            sg.cacti.push({ x: CONFIG.width + 60, height, passed: false });
+            sg.dinoNextGap = 300 + Math.random() * 270;
+          }
+        } else {
+          for (const pipe of sg.pipes) pipe.x -= sg.pipeSpeed;
+          if (sg.pipes.length > 0 && sg.pipes[0].x < -100) {
+            sg.pipes.shift();
+            makePipe(sg.pipes[sg.pipes.length - 1].x + 600);
+          }
         }
-      }, 1500);
+        for (const coin of sg.coins) coin.x -= sg.pipeSpeed;
+        sg.coins = sg.coins.filter((c) => c.x > -40);
+        for (const m of sg.mushrooms) m.x -= sg.pipeSpeed;
+        sg.mushrooms = sg.mushrooms.filter((m) => m.x > -60);
+        draw();
+      }, 20);
       setGamePhase("dead");
     }
   }
@@ -920,15 +1284,25 @@ export default function Game({
     const g = gameRef.current;
     if (g.countdownActive) return;
     if (g.over || !g.started) return;
-    g.birdVelocity = 9;
+    if (g.dinoMode) {
+      if (!g.dinoIsJumping) {
+        g.dinoVelocity = 13; // positive = upward in flappy coords
+        g.dinoIsJumping = true;
+        playOink();
+      }
+    } else {
+      g.birdVelocity = 9;
+    }
   }
 
   function startGame() {
     const g = gameRef.current;
     g.over = false;
     g.score = 0;
-    g.birdY = 200;
+    g.birdY = g.dinoMode ? g.dinoGroundY : 300;
     g.birdVelocity = 0;
+    g.dinoVelocity = 0;
+    g.dinoIsJumping = false;
     g.isPowered = false;
     g.bigMode = false;
     if (g.bigTimer) {
@@ -939,16 +1313,22 @@ export default function Game({
       clearTimeout(g.powerTimer);
       g.powerTimer = null;
     }
-    g.birdSize = { w: 54, h: 46 };
+    g.birdSize = g.dinoMode ? { w: 30, h: 30 } : { w: 54, h: 46 };
     g.pipesWiggling = false;
     g.pipeSpeed = g.initialSpeed; // use stored initialSpeed, not global CONFIG
     g.pipesPassedCount = 0;
+    // Clear pipes, cacti, items
+    g.pipes = [];
+    g.cacti = [];
+    g.coins = [];
+    g.mushrooms = [];
+    g.dinoNextGap = 450;
     // (Re-)initialize seeded RNG so all players get identical pipe sequence
     if (g.gameSeed) g.rng = mulberry32(g.gameSeed);
     g.deathParticles = [];
     g.winParticles = [];
     setUiScore(0);
-    initPipes();
+    if (!g.dinoMode) initPipes(); // dino mode spawns cacti in tick
     g.started = true;
     if (g.gameLoop) clearInterval(g.gameLoop);
     g.gameLoop = setInterval(tick, 20);
@@ -1003,29 +1383,48 @@ export default function Game({
 
   // ── SOCKET ────────────────────────────────────────────
   useEffect(() => {
+    if (solo) return; // solo players don't need multiplayer socket
     // Guard against React StrictMode double-invoke:
     // cancelled flag prevents the async fetch callback from creating a socket
     // after the cleanup has already run.
     let cancelled = false;
 
-    // Wake up the socket.io server endpoint first
-    fetch("/api/socketio").finally(() => {
+    const externalUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+    const socketPath = externalUrl ? "/socket.io" : "/api/socketio";
+
+    // Wake up the socket.io server endpoint (only needed for embedded server)
+    const wakeup = externalUrl
+      ? Promise.resolve()
+      : fetch("/api/socketio").then(() => {});
+    wakeup.finally(() => {
       if (cancelled) return; // cleanup already ran — abort
 
-      const socket = io({
-        path: "/api/socketio",
+      const socket = io(externalUrl || undefined, {
+        path: socketPath,
         transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
+        reconnectionDelayMax: 5000,
       });
       socketRef.current = socket;
 
+      function joinRoom() {
+        socket.emit("join_room", {
+          roomId,
+          username,
+          pigColor,
+          speed: initialSpeed || CONFIG.baseSpeed,
+        });
+      }
+
       socket.on("connect", () => {
-        if (!solo)
-          socket.emit("join_room", {
-            roomId,
-            username,
-            pigColor,
-            speed: initialSpeed || CONFIG.baseSpeed,
-          });
+        joinRoom();
+      });
+
+      // On reconnect, rejoin room and request state sync
+      socket.on("reconnect", () => {
+        joinRoom();
       });
 
       socket.on(
@@ -1137,12 +1536,17 @@ export default function Game({
           const myWon = winnerId === socket.id;
           setTargetScore(null);
 
-          // All players are dead at this point — no need to force-stop anyone
+          // Stop spectator loop before showing result overlay
+          const g2 = gameRef.current;
+          if (g2.animLoop) {
+            clearInterval(g2.animLoop);
+            g2.animLoop = null;
+          }
+
           if (myWon) {
             playWin();
             spawnWinParticles();
           }
-          // Dead players already heard lose sound in endGame()
 
           const animLoop = setInterval(() => draw(), 20);
           setTimeout(() => {
@@ -1160,6 +1564,15 @@ export default function Game({
           }, 2000);
         },
       );
+
+      // Chat — use showChatRef to avoid stale closure
+      socket.on("chat_message", (msg: ChatMsg) => {
+        setChatMessages((prev) => [...prev, msg].slice(-100));
+        setUnreadChat((n) => (showChatRef.current ? 0 : n + 1));
+      });
+      socket.on("chat_history", (msgs: ChatMsg[]) => {
+        setChatMessages(msgs.slice(-100));
+      });
     });
 
     return () => {
@@ -1174,7 +1587,7 @@ export default function Game({
   useEffect(() => {
     if (solo) {
       gameRef.current.initialSpeed = initialSpeed || 3;
-      startCountdown(3, startGame);
+      startCountdown(5, startGame);
     }
     return () => {
       // Cleanup all intervals when component unmounts (handles React StrictMode double-invoke)
@@ -1229,248 +1642,451 @@ export default function Game({
     g.winParticles = [];
     setResultData(null);
     if (solo) {
-      startCountdown(3, startGame);
+      startCountdown(5, startGame);
     } else {
-      // Go back to lobby so players can create/join a fresh room
-      window.location.href = "/lobby";
+      // Ask server to reset the room (host only; non-host button is hidden)
+      socketRef.current?.emit("request_room_reset");
     }
   }
 
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div className="flex flex-col items-center gap-2 w-full px-1">
+      {/* Scaled canvas wrapper */}
       <div
-        className="relative"
-        style={{ width: CONFIG.width, height: CONFIG.height }}
+        style={{
+          width: CONFIG.width * canvasScale,
+          height: CONFIG.height * canvasScale,
+          flexShrink: 0,
+        }}
       >
-        <canvas
-          ref={canvasRef}
-          width={CONFIG.width}
-          height={CONFIG.height}
-          className="rounded-xl shadow-2xl cursor-pointer"
-          style={{ border: "3px solid #e8829a" }}
-          onClick={jump}
-          onTouchStart={(e) => {
-            e.preventDefault();
-            jump();
+        <div
+          className="relative"
+          style={{
+            width: CONFIG.width,
+            height: CONFIG.height,
+            transform: `scale(${canvasScale})`,
+            transformOrigin: "top left",
           }}
-        />
+        >
+          <canvas
+            ref={canvasRef}
+            width={CONFIG.width}
+            height={CONFIG.height}
+            className="rounded-xl shadow-2xl cursor-pointer select-none"
+            style={{ border: "3px solid #e8829a", touchAction: "none" }}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              jump();
+            }}
+          />
 
-        {/* Waiting for opponent / waiting room */}
-        {gamePhase === "waiting" && !solo && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/60 p-4">
-            <div className="text-4xl mb-2">🐷</div>
-            <h2 className="text-white text-2xl font-bold mb-1">Ruang Tunggu</h2>
-            <p className="text-white/60 text-sm mb-4 font-mono">
-              Room: <span className="text-yellow-300 font-bold">{roomId}</span>
-            </p>
+          {/* Waiting for opponent / waiting room */}
+          {gamePhase === "waiting" && !solo && (
+            <div className="absolute inset-0 flex flex-col items-center justify-start rounded-xl bg-black/60 p-4 overflow-y-auto">
+              <div className="text-4xl mb-2 mt-2">🐷</div>
+              <h2 className="text-white text-2xl font-bold mb-1">
+                Ruang Tunggu
+              </h2>
+              <p className="text-white/60 text-sm mb-4 font-mono">
+                Room:{" "}
+                <span className="text-yellow-300 font-bold">{roomId}</span>
+              </p>
 
-            {/* Player list */}
-            <div className="bg-white/10 rounded-xl p-3 w-72 mb-4 max-h-64 overflow-y-auto">
-              {roomPlayers.length === 0 ? (
-                <p className="text-white/40 text-xs text-center py-2">
-                  Menghubungkan...
-                </p>
-              ) : (
-                roomPlayers
-                  .slice()
-                  .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0))
-                  .map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-center gap-2 py-2 border-b border-white/10 last:border-0"
-                    >
-                      <span
-                        className="inline-block w-6 h-6 rounded-full border-2 border-white/40 text-center text-xs leading-5"
-                        style={{
-                          backgroundColor: PIG_COLOR_HEX[p.pigColor || "pink"],
-                        }}
+              {/* Player list */}
+              <div className="bg-white/10 rounded-xl p-3 w-72 mb-4 max-h-64 overflow-y-auto">
+                {roomPlayers.length === 0 ? (
+                  <p className="text-white/40 text-xs text-center py-2">
+                    Menghubungkan...
+                  </p>
+                ) : (
+                  roomPlayers
+                    .slice()
+                    .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0))
+                    .map((p) => (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-2 py-2 border-b border-white/10 last:border-0"
                       >
-                        🐷
-                      </span>
-                      <span className="text-white font-semibold flex-1 truncate">
-                        {p.username}
-                      </span>
-                      {(p.slot ?? 99) === 0 && (
-                        <span className="text-yellow-300 text-xs font-bold bg-yellow-300/20 px-1.5 py-0.5 rounded">
-                          HOST
+                        <span
+                          className="inline-block w-6 h-6 rounded-full border-2 border-white/40 text-center text-xs leading-5"
+                          style={{
+                            backgroundColor:
+                              PIG_COLOR_HEX[p.pigColor || "pink"],
+                          }}
+                        >
+                          🐷
                         </span>
-                      )}
-                    </div>
-                  ))
-              )}
-              {roomPlayers.length > 0 && roomPlayers.length < 2 && (
-                <p className="text-white/40 text-xs text-center pt-2">
-                  Menunggu pemain lain bergabung...
-                </p>
-              )}
-            </div>
+                        <span className="text-white font-semibold flex-1 truncate">
+                          {p.username}
+                        </span>
+                        {(p.slot ?? 99) === 0 && (
+                          <span className="text-yellow-300 text-xs font-bold bg-yellow-300/20 px-1.5 py-0.5 rounded">
+                            HOST
+                          </span>
+                        )}
+                      </div>
+                    ))
+                )}
+                {roomPlayers.length > 0 && roomPlayers.length < 2 && (
+                  <p className="text-white/40 text-xs text-center pt-2">
+                    Menunggu pemain lain bergabung...
+                  </p>
+                )}
+              </div>
 
-            {/* Start / waiting indicator */}
-            {isHost ? (
-              <div className="flex flex-col items-center gap-3 w-72">
-                {/* Speed slider for host */}
-                <div className="bg-white/10 rounded-xl p-3 w-full">
-                  <p className="text-white/70 text-xs mb-1">
-                    ⚡ Kecepatan awal:{" "}
+              {/* Start / waiting indicator */}
+              {isHost ? (
+                <div className="flex flex-col items-center gap-3 w-72">
+                  {/* Speed slider for host */}
+                  <div className="bg-white/10 rounded-xl p-3 w-full">
+                    <p className="text-white/70 text-xs mb-1">
+                      ⚡ Kecepatan awal:{" "}
+                      <span className="text-yellow-200 font-bold">
+                        {roomSpeed}
+                      </span>
+                    </p>
+                    <input
+                      type="range"
+                      min="1"
+                      max="8"
+                      step="0.5"
+                      value={roomSpeed}
+                      onChange={(e) => {
+                        const v = parseFloat(e.target.value);
+                        setRoomSpeed(v);
+                        socketRef.current?.emit("update_speed", { speed: v });
+                      }}
+                      className="w-full accent-pink-400"
+                    />
+                    <div className="flex justify-between text-white/40 text-xs mt-0.5">
+                      <span>Pelan</span>
+                      <span>Cepat</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => socketRef.current?.emit("room_ready")}
+                    disabled={roomPlayers.length < 2}
+                    className="w-full py-3 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xl font-bold rounded-full shadow-lg transition active:scale-95"
+                  >
+                    ▶️ Mulai Game ({roomPlayers.length}/10)
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <p className="text-white/50 text-sm">
+                    ⚡ Kecepatan:{" "}
                     <span className="text-yellow-200 font-bold">
                       {roomSpeed}
                     </span>
                   </p>
-                  <input
-                    type="range"
-                    min="1"
-                    max="8"
-                    step="0.5"
-                    value={roomSpeed}
-                    onChange={(e) => {
-                      const v = parseFloat(e.target.value);
-                      setRoomSpeed(v);
-                      socketRef.current?.emit("update_speed", { speed: v });
-                    }}
-                    className="w-full accent-pink-400"
-                  />
-                  <div className="flex justify-between text-white/40 text-xs mt-0.5">
-                    <span>Pelan</span>
-                    <span>Cepat</span>
+                  <div className="flex gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="w-3 h-3 rounded-full bg-pink-400 animate-bounce"
+                        style={{ animationDelay: `${i * 0.2}s` }}
+                      />
+                    ))}
                   </div>
+                  <p className="text-white/70 text-sm">
+                    Menunggu host memulai...
+                  </p>
                 </div>
-                <button
-                  onClick={() => socketRef.current?.emit("room_ready")}
-                  disabled={roomPlayers.length < 2}
-                  className="w-full py-3 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xl font-bold rounded-full shadow-lg transition active:scale-95"
-                >
-                  ▶️ Mulai Game ({roomPlayers.length}/10)
-                </button>
+              )}
+            </div>
+          )}
+
+          {/* Spectating banner when dead in multiplayer */}
+          {gamePhase === "dead" && !solo && (
+            <div className="absolute bottom-14 left-1/2 -translate-x-1/2 pointer-events-none z-10">
+              <div className="flex items-center gap-2 bg-black/65 text-white text-sm font-bold px-4 py-2 rounded-full shadow-lg">
+                <span className="animate-pulse">💀</span>
+                <span>Kamu mati — menonton pemain lain...</span>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-2">
-                <p className="text-white/50 text-sm">
-                  ⚡ Kecepatan:{" "}
-                  <span className="text-yellow-200 font-bold">{roomSpeed}</span>
+            </div>
+          )}
+
+          {/* Last survivor banner */}
+          {gamePhase === "playing" && targetScore !== null && !solo && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 pointer-events-none">
+              <div className="bg-yellow-400/90 text-gray-900 font-bold text-sm px-4 py-1.5 rounded-full shadow-lg animate-pulse whitespace-nowrap">
+                🏆 Kamu tersisa! Kalahkan skor{" "}
+                <span className="text-pink-700">{targetScore}</span> untuk
+                menang!
+              </div>
+            </div>
+          )}
+
+          {/* Countdown overlay with player list */}
+          {gamePhase === "countdown" && !solo && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/60 pointer-events-none">
+              <p className="text-white/70 text-sm mb-2">
+                Game dimulai dalam...
+              </p>
+              <div
+                className="text-yellow-300 font-extrabold drop-shadow-lg"
+                style={{
+                  fontSize: "140px",
+                  lineHeight: 1,
+                  textShadow: "0 0 30px #ff6347",
+                }}
+              >
+                {countdown}
+              </div>
+              <div className="flex flex-wrap justify-center gap-2 mt-4 max-w-sm px-4">
+                {roomPlayers
+                  .slice()
+                  .sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0))
+                  .map((p) => (
+                    <span
+                      key={p.id}
+                      className="flex items-center gap-1 bg-white/15 px-2 py-1 rounded-full text-sm font-bold"
+                      style={{
+                        color:
+                          p.id === socketRef.current?.id ? "#ffd700" : "#fff",
+                      }}
+                    >
+                      <span
+                        className="inline-block w-3 h-3 rounded-full border border-white/40"
+                        style={{
+                          backgroundColor: PIG_COLOR_HEX[p.pigColor || "pink"],
+                        }}
+                      />
+                      {p.username}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          {/* Result overlay */}
+          {gamePhase === "result" && resultData && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/75 overflow-y-auto py-4">
+              {resultData.myWon || solo ? (
+                <div className="text-center mb-2">
+                  <div className="text-7xl mb-1">{solo ? "🐷" : "🏆"}</div>
+                  <h2 className="text-yellow-300 text-4xl font-bold drop-shadow-lg">
+                    {solo ? "Game Over!" : "MENANG! 🎉"}
+                  </h2>
+                </div>
+              ) : (
+                <div className="text-center mb-2">
+                  <div className="text-7xl mb-1">💀</div>
+                  <h2 className="text-red-400 text-4xl font-bold drop-shadow-lg">
+                    KALAH!
+                  </h2>
+                  {resultData.winner && (
+                    <p className="text-white text-base mt-1">
+                      Pemenang:{" "}
+                      <span className="text-yellow-300 font-bold">
+                        {resultData.winner}
+                      </span>
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Score table */}
+              <div className="bg-white/10 rounded-xl p-3 w-72 mb-3">
+                <p className="text-white/60 text-xs text-center mb-2 font-bold tracking-widest">
+                  SKOR AKHIR
                 </p>
-                <div className="flex gap-1">
-                  {[0, 1, 2].map((i) => (
+                {resultData.scores
+                  .slice()
+                  .sort((a, b) => b.score - a.score)
+                  .map((s, i) => (
                     <div
                       key={i}
-                      className="w-3 h-3 rounded-full bg-pink-400 animate-bounce"
-                      style={{ animationDelay: `${i * 0.2}s` }}
-                    />
+                      className="flex items-center gap-2 py-1.5 border-b border-white/15 last:border-0"
+                    >
+                      <span className="text-base w-5 text-center">
+                        {i === 0
+                          ? "🥇"
+                          : i === 1
+                            ? "🥈"
+                            : i === 2
+                              ? "🥉"
+                              : `${i + 1}.`}
+                      </span>
+                      <span
+                        className="inline-block w-3 h-3 rounded-full border border-white/30 shrink-0"
+                        style={{
+                          backgroundColor:
+                            PIG_COLOR_HEX[
+                              roomPlayers.find(
+                                (rp) => rp.username === s.username,
+                              )?.pigColor || "pink"
+                            ] || "#ffc8d8",
+                        }}
+                      />
+                      <span
+                        className={`flex-1 font-semibold truncate text-sm ${
+                          s.username === username
+                            ? "text-yellow-300"
+                            : "text-white"
+                        }`}
+                      >
+                        {s.username}
+                      </span>
+                      <span className="text-yellow-300 font-bold text-sm">
+                        {s.score}
+                      </span>
+                    </div>
                   ))}
-                </div>
-                <p className="text-white/70 text-sm">
-                  Menunggu host memulai...
-                </p>
               </div>
-            )}
-          </div>
-        )}
 
-        {/* Last survivor banner */}
-        {gamePhase === "playing" && targetScore !== null && !solo && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 pointer-events-none">
-            <div className="bg-yellow-400/90 text-gray-900 font-bold text-sm px-4 py-1.5 rounded-full shadow-lg animate-pulse whitespace-nowrap">
-              🏆 Kamu tersisa! Kalahkan skor{" "}
-              <span className="text-pink-700">{targetScore}</span> untuk menang!
-            </div>
-          </div>
-        )}
-
-        {/* Countdown overlay with opponent info */}
-        {gamePhase === "countdown" && !solo && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/60 pointer-events-none">
-            {opponentName && (
-              <div className="mb-4 text-center animate-pulse">
-                <span className="text-green-300 text-lg font-bold">
-                  ✅ {opponentName} bergabung!
-                </span>
-                <p className="text-white/70 text-sm mt-1">
-                  Game dimulai dalam...
-                </p>
-              </div>
-            )}
-            <div
-              className="text-yellow-300 font-extrabold drop-shadow-lg"
-              style={{
-                fontSize: "140px",
-                lineHeight: 1,
-                textShadow: "0 0 30px #ff6347",
-              }}
-            >
-              {countdown}
-            </div>
-            <div className="flex gap-6 mt-6 text-white font-bold text-lg">
-              <span>🐷 {username}</span>
-              <span className="text-white/40">vs</span>
-              <span>🐷 {opponentName || "???"}</span>
-            </div>
-          </div>
-        )}
-
-        {/* Result overlay */}
-        {gamePhase === "result" && resultData && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center rounded-xl bg-black/70">
-            {resultData.myWon || solo ? (
-              <div className="text-center animate-bounce">
-                <div className="text-8xl mb-2">🏆</div>
-                <h2 className="text-yellow-300 text-5xl font-bold drop-shadow-lg">
-                  {solo ? "Game Over!" : "MENANG! 🎉"}
-                </h2>
-              </div>
-            ) : (
-              <div className="text-center">
-                <div
-                  className="text-8xl mb-2 animate-spin"
-                  style={{ animationDuration: "1s" }}
+              {/* Restart actions */}
+              {solo ? (
+                <button
+                  onClick={handleRestart}
+                  className="px-8 py-3 bg-pink-500 hover:bg-pink-400 text-white text-lg font-bold rounded-full shadow-lg transition active:scale-95"
                 >
-                  💀
-                </div>
-                <h2 className="text-red-400 text-5xl font-bold drop-shadow-lg">
-                  KALAH!
-                </h2>
-                {resultData.winner && (
-                  <p className="text-white text-xl mt-1">
-                    Pemenang:{" "}
-                    <span className="text-yellow-300 font-bold">
-                      {resultData.winner}
-                    </span>
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="mt-4 bg-white/10 rounded-xl p-4 min-w-65">
-              {resultData.scores
-                .sort((a, b) => b.score - a.score)
-                .map((s, i) => (
-                  <div
-                    key={i}
-                    className="flex justify-between text-white font-semibold py-1 border-b border-white/20 last:border-0"
+                  🔄 Main Lagi
+                </button>
+              ) : isHost ? (
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={handleRestart}
+                    className="px-8 py-3 bg-green-500 hover:bg-green-400 text-white text-lg font-bold rounded-full shadow-lg transition active:scale-95"
                   >
-                    <span>
-                      {i === 0 ? "🥇" : i === 1 ? "🥈" : "🥉"} {s.username}
-                    </span>
-                    <span className="text-yellow-300">{s.score}</span>
+                    ▶️ Main Lagi (Host)
+                  </button>
+                  <p className="text-white/50 text-xs">
+                    Semua pemain di room akan ikut
+                  </p>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex gap-1">
+                    {[0, 1, 2].map((i) => (
+                      <div
+                        key={i}
+                        className="w-2 h-2 rounded-full bg-white/60 animate-bounce"
+                        style={{ animationDelay: `${i * 0.2}s` }}
+                      />
+                    ))}
                   </div>
-                ))}
+                  <p className="text-white/70 text-sm">
+                    Menunggu host memulai ulang...
+                  </p>
+                </div>
+              )}
+
+              <a
+                href="/lobby"
+                className="mt-2 text-xs text-white/40 hover:text-white underline"
+              >
+                Keluar ke Lobby
+              </a>
+              <a
+                href="/leaderboard"
+                className="mt-1 text-xs text-white/40 hover:text-white underline"
+              >
+                🏆 Lihat Leaderboard
+              </a>
             </div>
-            <button
-              onClick={handleRestart}
-              className="mt-5 px-8 py-3 bg-pink-500 hover:bg-pink-400 text-white text-xl font-bold rounded-full shadow-lg transition active:scale-95"
-            >
-              Main Lagi
-            </button>
-            <a
-              href="/leaderboard"
-              className="mt-2 text-sm text-white/60 hover:text-white underline"
-            >
-              Lihat Leaderboard
-            </a>
-          </div>
+          )}
+        </div>
+        {/* end inner scale div */}
+      </div>
+      {/* end outer size div */}
+
+      {/* Bottom bar: speed + chat toggle */}
+      <div
+        className="flex items-center gap-2 bg-white/20 backdrop-blur px-4 py-2 rounded-full text-white font-bold shadow"
+        style={{ width: CONFIG.width * canvasScale, maxWidth: "100%" }}
+      >
+        <span className="text-sm flex-1">
+          ⚡ Kecepatan: {gameRef.current.initialSpeed}
+        </span>
+        {!solo && (
+          <button
+            onClick={() => {
+              setShowChat((v) => !v);
+              if (!showChat) setUnreadChat(0);
+            }}
+            className="relative flex items-center gap-1 px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-sm transition active:scale-95"
+          >
+            💬
+            {unreadChat > 0 && !showChat && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full text-xs flex items-center justify-center">
+                {unreadChat > 9 ? "9+" : unreadChat}
+              </span>
+            )}
+          </button>
         )}
       </div>
 
-      <div className="flex items-center gap-4 bg-white/20 backdrop-blur px-6 py-2 rounded-full text-white font-bold shadow">
-        <span>⚡ Kecepatan: {gameRef.current.initialSpeed}</span>
-      </div>
+      {/* Chat panel (multiplayer only) */}
+      {!solo && showChat && (
+        <div
+          className="flex flex-col bg-white/15 backdrop-blur rounded-2xl shadow-xl overflow-hidden"
+          style={{
+            width: CONFIG.width * canvasScale,
+            maxWidth: "100%",
+            maxHeight: 260,
+          }}
+        >
+          {/* Message list */}
+          <div
+            className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5"
+            style={{ minHeight: 0, maxHeight: 200 }}
+          >
+            {chatMessages.length === 0 ? (
+              <p className="text-white/40 text-xs text-center py-4">
+                Belum ada pesan. Sapa pemain lain!
+              </p>
+            ) : (
+              chatMessages.map((msg) => (
+                <div key={msg.id} className="flex items-start gap-1.5 text-sm">
+                  <span
+                    className="mt-0.5 shrink-0 inline-block w-2.5 h-2.5 rounded-full border border-white/30"
+                    style={{
+                      backgroundColor: PIG_COLOR_HEX[msg.pigColor] || "#ffc8d8",
+                    }}
+                  />
+                  <span
+                    className="font-bold shrink-0"
+                    style={{
+                      color: msg.username === username ? "#ffd700" : "#fff",
+                    }}
+                  >
+                    {msg.username}:
+                  </span>
+                  <span className="text-white/90 break-words min-w-0">
+                    {msg.text}
+                  </span>
+                </div>
+              ))
+            )}
+            <div ref={chatEndRef} />
+          </div>
+          {/* Input */}
+          <div className="flex gap-2 px-3 py-2 border-t border-white/20 bg-black/10">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  sendChat();
+                }
+              }}
+              placeholder="Ketik pesan..."
+              maxLength={200}
+              className="flex-1 bg-white/20 text-white placeholder-white/40 rounded-xl px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-pink-300 min-w-0"
+            />
+            <button
+              onClick={sendChat}
+              disabled={!chatInput.trim()}
+              className="px-3 py-1.5 bg-pink-500 hover:bg-pink-400 disabled:opacity-40 text-white text-sm font-bold rounded-xl transition active:scale-95 shrink-0"
+            >
+              Kirim
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

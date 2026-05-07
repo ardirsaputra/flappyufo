@@ -26,6 +26,14 @@ interface OnlinePlayer {
   pigColor: string;
 }
 
+interface ChatMessage {
+  id: string;
+  username: string;
+  pigColor: string;
+  text: string;
+  ts: number;
+}
+
 interface Room {
   id: string;
   players: Map<string, Player>;
@@ -39,21 +47,47 @@ interface Room {
 const rooms: Map<string, Room> = new Map();
 // Players sitting in the lobby (not yet in a game room)
 const lobbyPlayers: Map<string, OnlinePlayer> = new Map();
+// Chat messages per room (messages older than 1 hour are periodically purged)
+const chatMessages: Map<string, ChatMessage[]> = new Map();
+// Lobby global chat (same purge policy)
+const lobbyChatMessages: ChatMessage[] = [];
+
+// Purge messages older than 1 hour every 5 minutes
+setInterval(() => {
+  const oneHourAgo = Date.now() - 3_600_000;
+  for (const [roomId, msgs] of chatMessages.entries()) {
+    const fresh = msgs.filter((m) => m.ts > oneHourAgo);
+    if (fresh.length === 0) chatMessages.delete(roomId);
+    else chatMessages.set(roomId, fresh);
+  }
+  const freshLobby = lobbyChatMessages.filter((m) => m.ts > oneHourAgo);
+  lobbyChatMessages.length = 0;
+  freshLobby.forEach((m) => lobbyChatMessages.push(m));
+}, 5 * 60 * 1000);
 
 function broadcastLobby(io: SocketIOServer) {
   io.emit("lobby_players", Array.from(lobbyPlayers.values()));
 }
 
 export function initSocket(server: NetServer) {
+  const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim())
+    : ["*"];
+
   const io = new SocketIOServer(server, {
     path: "/api/socketio",
     cors: {
-      origin: "*",
+      origin: allowedOrigins.length === 1 && allowedOrigins[0] === "*"
+        ? "*"
+        : allowedOrigins,
       methods: ["GET", "POST"],
       credentials: false,
     },
     allowEIO3: true,
     transports: ["websocket", "polling"],
+    // Keep connections alive with pings
+    pingTimeout: 60000,
+    pingInterval: 25000,
   });
 
   io.on("connection", (socket: Socket) => {
@@ -71,12 +105,35 @@ export function initSocket(server: NetServer) {
           pigColor: pigColor || "pink",
         });
         broadcastLobby(io);
+        // Send recent lobby chat history (last hour) to the joining player
+        const oneHourAgo = Date.now() - 3_600_000;
+        const history = lobbyChatMessages.filter((m) => m.ts > oneHourAgo).slice(-50);
+        if (history.length > 0) socket.emit("lobby_chat_history", history);
       },
     );
 
     socket.on("lobby_leave", () => {
       lobbyPlayers.delete(socket.id);
       broadcastLobby(io);
+    });
+
+    // Lobby global chat
+    socket.on("lobby_chat_send", ({ text }: { text: string }) => {
+      if (!currentUser) return;
+      const trimmed = String(text).trim().slice(0, 200);
+      if (!trimmed) return;
+      const player = lobbyPlayers.get(socket.id);
+      const msg: ChatMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        username: currentUser,
+        pigColor: player?.pigColor || "pink",
+        text: trimmed,
+        ts: Date.now(),
+      };
+      lobbyChatMessages.push(msg);
+      // Keep at most 200 messages
+      if (lobbyChatMessages.length > 200) lobbyChatMessages.splice(0, lobbyChatMessages.length - 200);
+      io.emit("lobby_chat_message", msg);
     });
 
     // Invite another player in lobby to a room
@@ -221,8 +278,33 @@ export function initSocket(server: NetServer) {
             speed: room.speed,
           });
         }
+
+        // Send recent chat history (last hour)
+        const oneHourAgo = Date.now() - 3_600_000;
+        const history = (chatMessages.get(roomId) || []).filter(
+          (m) => m.ts > oneHourAgo,
+        );
+        if (history.length > 0) socket.emit("chat_history", history);
       },
     );
+
+    // Chat message from a player in a room
+    socket.on("chat_send", ({ text }: { text: string }) => {
+      if (!currentRoom || !currentUser) return;
+      const trimmed = text.trim().slice(0, 200);
+      if (!trimmed) return;
+      const player = rooms.get(currentRoom)?.players.get(socket.id);
+      const msg: ChatMessage = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        username: currentUser,
+        pigColor: player?.pigColor || "pink",
+        text: trimmed,
+        ts: Date.now(),
+      };
+      if (!chatMessages.has(currentRoom)) chatMessages.set(currentRoom, []);
+      chatMessages.get(currentRoom)!.push(msg);
+      io.to(currentRoom).emit("chat_message", msg);
+    });
 
     // Host explicitly starts the game
     socket.on("room_ready", () => {
@@ -316,26 +398,46 @@ export function initSocket(server: NetServer) {
           })),
         });
         // Reset room and notify players to return to waiting room
-        setTimeout(() => {
-          if (rooms.has(currentRoom!)) {
-            const r = rooms.get(currentRoom!)!;
-            r.started = false;
-            r.players.forEach((p) => {
-              p.alive = true;
-              p.score = 0;
-              p.y = 200;
-              p.powered = false;
-              p.bigMode = false;
-            });
-            // Tell all players the room is reset so they can play again
-            io.to(currentRoom!).emit("room_reset", {
-              players: Array.from(r.players.values()),
-              host: r.host,
-              speed: r.speed,
-            });
-          }
-        }, 5000);
+        const resetRoom = () => {
+          if (!rooms.has(currentRoom!)) return;
+          const r = rooms.get(currentRoom!)!;
+          r.started = false;
+          r.players.forEach((p) => {
+            p.alive = true;
+            p.score = 0;
+            p.y = 300;
+            p.powered = false;
+            p.bigMode = false;
+          });
+          io.to(currentRoom!).emit("room_reset", {
+            players: Array.from(r.players.values()),
+            host: r.host,
+            speed: r.speed,
+          });
+        };
+        // Auto-reset after 30s as fallback
+        setTimeout(resetRoom, 30000);
       }
+    });
+
+    // Host requests immediate room reset from result screen
+    socket.on("request_room_reset", () => {
+      if (!currentRoom) return;
+      const room = rooms.get(currentRoom);
+      if (!room || socket.id !== room.host) return;
+      room.started = false;
+      room.players.forEach((p) => {
+        p.alive = true;
+        p.score = 0;
+        p.y = 300;
+        p.powered = false;
+        p.bigMode = false;
+      });
+      io.to(currentRoom).emit("room_reset", {
+        players: Array.from(room.players.values()),
+        host: room.host,
+        speed: room.speed,
+      });
     });
 
     socket.on("disconnect", () => {

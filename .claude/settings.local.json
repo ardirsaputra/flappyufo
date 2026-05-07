@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(netstat -ano)",
+      "Bash(findstr \":3000\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(tasklist /FI \"PID eq 20600\" /FO LIST)",
+      "Bash(node server.js)",
+      "Bash(echo \"Server PID: $!\")",
+      "Bash(sleep 5 && cat /tmp/server-log.txt 2>/dev/null || echo \"no log yet\")",
+      "Read(//tmp/**)",
+      "Bash(ssh -o StrictHostKeyChecking=no -R 80:localhost:3000 localhost.run)",
+      "Bash(jobs -l)"
+    ]
+  }
+}
