@@ -20,6 +20,7 @@ function GamePageInner() {
   const mode = searchParams?.get("mode") || "solo";
   const roomId = searchParams?.get("room") || "solo-room";
   const initialSpeed = parseFloat(searchParams?.get("speed") || "3");
+  const roomPassword = searchParams?.get("pw") || "";
 
   useEffect(() => {
     const stored = localStorage.getItem("fp_user");
@@ -70,6 +71,7 @@ function GamePageInner() {
         pigColor={user.pigColor || "pink"}
         character={user.character || "pig"}
         initialSpeed={initialSpeed}
+        password={roomPassword}
       />
     </div>
   );

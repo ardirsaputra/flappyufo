@@ -24,6 +24,7 @@ interface GameProps {
   pigColor?: string;
   character?: string;
   initialSpeed?: number;
+  password?: string;
 }
 
 const CONFIG = {
@@ -83,6 +84,7 @@ export default function Game({
   pigColor = "pink",
   character = "pig",
   initialSpeed,
+  password = "",
 }: GameProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameRef = useRef({
@@ -117,6 +119,7 @@ export default function Game({
     pipesPassedCount: 0,
     gameSeed: 0,
     initialSpeed: 3,
+    lastTickMs: 0,
     rng: null as (() => number) | null,
     frame: 0,
     flapAngle: 0,
@@ -1269,7 +1272,7 @@ export default function Game({
   }
 
   // ── GAME TICK ─────────────────────────────────────────
-  const tick = useCallback(() => {
+  const tick = useCallback((dtFactor = 1) => {
     const g = gameRef.current;
     if (!g.started || g.over) return;
 
@@ -1288,7 +1291,7 @@ export default function Game({
       }
 
       // Move & cleanup cacti
-      for (const c of g.cacti) c.x -= g.pipeSpeed;
+      for (const c of g.cacti) c.x -= g.pipeSpeed * dtFactor;
       g.cacti = g.cacti.filter((c) => c.x > -60);
 
       // Spawn next cactus when last one scrolled past the gap threshold
@@ -1333,7 +1336,7 @@ export default function Game({
       // Coin collection (dino mode)
       g.coins = g.coins.filter((coin) => {
         if (coin.collected) return false;
-        coin.x -= g.pipeSpeed;
+        coin.x -= g.pipeSpeed * dtFactor;
         if (coin.x < -40) return false;
         const r = coin.radius;
         const cx = coin.x + r, cy2 = coin.y + r;
@@ -1351,7 +1354,7 @@ export default function Game({
 
       // Mushroom collection (dino mode)
       g.mushrooms = g.mushrooms.filter((m) => {
-        m.x -= g.pipeSpeed;
+        m.x -= g.pipeSpeed * dtFactor;
         if (m.x < -60) return false;
         const mx = m.x + 18,
           my = m.y + 18;
@@ -1405,7 +1408,7 @@ export default function Game({
     const birdBottom = CONFIG.height - g.birdY;
 
     g.pipes.forEach((pipe) => {
-      pipe.x -= g.pipeSpeed;
+      pipe.x -= g.pipeSpeed * dtFactor;
       const px = pipe.x,
         pr = pipe.x + 60;
 
@@ -1452,7 +1455,7 @@ export default function Game({
     // Coins
     g.coins = g.coins.filter((coin) => {
       if (coin.collected) return false;
-      coin.x -= g.pipeSpeed;
+      coin.x -= g.pipeSpeed * dtFactor;
       if (coin.x < -40) return false;
       const r = coin.radius;
       const cx = coin.x + r, cy2 = coin.y + r;
@@ -1470,7 +1473,7 @@ export default function Game({
 
     // Poison clouds
     g.poisons = g.poisons.filter((poison) => {
-      poison.x -= g.pipeSpeed;
+      poison.x -= g.pipeSpeed * dtFactor;
       if (poison.x + poison.r < 0) return false;
       const bCx = 100 + bW / 2;
       const bCy = CONFIG.height - g.birdY - bH / 2;
@@ -1489,7 +1492,7 @@ export default function Game({
 
     // Mushrooms
     g.mushrooms = g.mushrooms.filter((m) => {
-      m.x -= g.pipeSpeed;
+      m.x -= g.pipeSpeed * dtFactor;
       if (m.x < -60) return false;
       const mx = m.x + 18,
         my = m.y + 18;
@@ -1570,7 +1573,11 @@ export default function Game({
       // Keep spectator loop alive so dead players can watch others
       // Also advance world state (pipes/cacti/items) so they keep scrolling
       if (g.animLoop) clearInterval(g.animLoop);
+      let lastAnimMs = Date.now();
       g.animLoop = setInterval(() => {
+        const now = Date.now();
+        const dtf = Math.min(now - lastAnimMs, 80) / 20;
+        lastAnimMs = now;
         const sg = gameRef.current;
         // Fall animation for dead player's pig
         if (!sg.dinoMode) {
@@ -1579,7 +1586,7 @@ export default function Game({
           if (sg.birdY < -80) sg.birdY = -80; // hold just below screen
         }
         if (sg.dinoMode) {
-          for (const c of sg.cacti) c.x -= sg.pipeSpeed;
+          for (const c of sg.cacti) c.x -= sg.pipeSpeed * dtf;
           sg.cacti = sg.cacti.filter((c) => c.x > -60);
           const lastC =
             sg.cacti.length > 0 ? sg.cacti[sg.cacti.length - 1] : null;
@@ -1589,17 +1596,17 @@ export default function Game({
             sg.dinoNextGap = 300 + Math.random() * 270;
           }
         } else {
-          for (const pipe of sg.pipes) pipe.x -= sg.pipeSpeed;
+          for (const pipe of sg.pipes) pipe.x -= sg.pipeSpeed * dtf;
           if (sg.pipes.length > 0 && sg.pipes[0].x < -100) {
             sg.pipes.shift();
             makePipe(sg.pipes[sg.pipes.length - 1].x + 600);
           }
-          for (const poison of sg.poisons) poison.x -= sg.pipeSpeed;
+          for (const poison of sg.poisons) poison.x -= sg.pipeSpeed * dtf;
           sg.poisons = sg.poisons.filter((p) => p.x + p.r > 0);
         }
-        for (const coin of sg.coins) coin.x -= sg.pipeSpeed;
+        for (const coin of sg.coins) coin.x -= sg.pipeSpeed * dtf;
         sg.coins = sg.coins.filter((c) => c.x > -40);
-        for (const m of sg.mushrooms) m.x -= sg.pipeSpeed;
+        for (const m of sg.mushrooms) m.x -= sg.pipeSpeed * dtf;
         sg.mushrooms = sg.mushrooms.filter((m) => m.x > -60);
         draw();
       }, 20);
@@ -1658,8 +1665,14 @@ export default function Game({
     setUiScore(0);
     if (!g.dinoMode) initPipes(); // dino mode spawns cacti in tick
     g.started = true;
+    g.lastTickMs = Date.now();
     if (g.gameLoop) clearInterval(g.gameLoop);
-    g.gameLoop = setInterval(tick, 20);
+    g.gameLoop = setInterval(() => {
+      const now = Date.now();
+      const dt = Math.min(now - g.lastTickMs, 80);
+      g.lastTickMs = now;
+      tick(dt / 20);
+    }, 20);
     setGamePhase("playing");
   }
 
@@ -1744,6 +1757,7 @@ export default function Game({
           pigColor,
           character,
           speed: initialSpeed || CONFIG.baseSpeed,
+          password: password || "",
         });
       }
 

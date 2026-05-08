@@ -22,6 +22,38 @@ const lobbyChatMessages = [];
 // username (lowercase) → socket.id — enforces single-device login
 const activeUsers = new Map();
 
+// ── Battle game state ──────────────────────────────────────────────────────
+const battleRooms = new Map();
+const BATTLE_SPAWN_X = [130, 670, 280, 520];
+
+function getNextBattleTurn(room) {
+  const alive = Array.from(room.players.values()).filter((p) => p.alive);
+  if (alive.length <= 1) return null;
+  const idx = alive.findIndex((p) => p.id === room.currentTurnId);
+  return alive[(idx + 1) % alive.length].id;
+}
+
+function resetBattleRoom(room, roomId) {
+  room.started = false;
+  room.gameOver = false;
+  room.currentTurnId = null;
+  room.doubleThrowActive = false;
+  room.rematchVotes.clear();
+  if (room.resetTimeout) { clearTimeout(room.resetTimeout); room.resetTimeout = null; }
+  Array.from(room.players.values()).forEach((p, _i, arr) => {
+    const slot = Array.from(arr).indexOf(p);
+    p.hp = 100;
+    p.alive = true;
+    p.x = BATTLE_SPAWN_X[slot] ?? 400;
+    p.powerUps = { big: true, double: true, explosive: true };
+  });
+  io.to(roomId).emit("battle_room_state", {
+    players: Array.from(room.players.values()),
+    host: room.host,
+    started: false,
+  });
+}
+
 // Purge messages older than 1 hour every 5 minutes
 setInterval(
   () => {
@@ -67,8 +99,8 @@ function broadcastLobby() {
   io.emit("lobby_players", Array.from(lobbyPlayers.values()));
 }
 
-function broadcastRooms() {
-  const list = Array.from(rooms.values())
+function getRoomList() {
+  const gameList = Array.from(rooms.values())
     .filter((r) => r.players.size > 0)
     .map((r) => {
       const hostPlayer = Array.from(r.players.values()).find((p) => p.id === r.host);
@@ -82,13 +114,32 @@ function broadcastRooms() {
         started: r.started,
       };
     });
-  io.emit("room_list", list);
+  const battleList = Array.from(battleRooms.values())
+    .filter((br) => br.players.size > 0)
+    .map((br) => {
+      const hostPlayer = Array.from(br.players.values()).find((p) => p.id === br.host);
+      return {
+        id: br.id,
+        host: hostPlayer?.username || "?",
+        playerCount: br.players.size,
+        gameMode: "battle",
+        speed: 0,
+        hasPassword: false,
+        started: br.started,
+      };
+    });
+  return [...gameList, ...battleList];
+}
+
+function broadcastRooms() {
+  io.emit("room_list", getRoomList());
 }
 
 // ── Socket handlers ────────────────────────────────────────────────────────
 io.on("connection", (socket) => {
   let currentRoom = null;
   let currentUser = null;
+  let currentBattleRoom = null;
 
   // ── LOBBY ──────────────────────────────────────────────────────────────
   socket.on("lobby_join", ({ username, pigColor, character }) => {
@@ -113,7 +164,9 @@ io.on("connection", (socket) => {
       pigColor: pigColor || "pink",
       character: character || "pig",
     });
+    socket.join("lobby");
     broadcastLobby();
+    socket.emit("room_list", getRoomList());
     const oneHourAgo = Date.now() - 3_600_000;
     const history = lobbyChatMessages
       .filter((m) => m.ts > oneHourAgo)
@@ -123,6 +176,7 @@ io.on("connection", (socket) => {
 
   socket.on("lobby_leave", () => {
     lobbyPlayers.delete(socket.id);
+    socket.leave("lobby");
     broadcastLobby();
   });
 
@@ -241,6 +295,7 @@ io.on("connection", (socket) => {
     });
 
     socket.join(roomId);
+    socket.leave("lobby");
     lobbyPlayers.delete(socket.id);
     broadcastLobby();
     broadcastRooms();
@@ -294,6 +349,7 @@ io.on("connection", (socket) => {
     room.started = true;
     room.startTime = Date.now();
     room.seed = Math.floor(Math.random() * 4294967296);
+    broadcastRooms();
     io.to(currentRoom).emit("game_start", {
       countdown: 3,
       seed: room.seed,
@@ -404,6 +460,7 @@ io.on("connection", (socket) => {
       p.powered = false;
       p.bigMode = false;
     });
+    broadcastRooms();
     io.to(currentRoom).emit("room_reset", {
       players: Array.from(room.players.values()),
       host: room.host,
@@ -436,12 +493,214 @@ io.on("connection", (socket) => {
         p.powered = false;
         p.bigMode = false;
       });
+      broadcastRooms();
       io.to(currentRoom).emit("game_start", {
         countdown: 3,
         seed: room.seed,
         speed: room.speed,
       });
     }
+  });
+
+  // ── BATTLE ─────────────────────────────────────────────────────────────
+  socket.on("battle_join", ({ roomId, username, pigColor, character: _character }) => {
+    void _character;
+    if (!roomId) return;
+    currentBattleRoom = roomId;
+    currentUser = username;
+    if (username) {
+      const key = String(username).toLowerCase();
+      activeUsers.set(key, socket.id);
+    }
+
+    if (!battleRooms.has(roomId)) {
+      battleRooms.set(roomId, {
+        id: roomId,
+        players: new Map(),
+        host: socket.id,
+        started: false,
+        gameOver: false,
+        currentTurnId: null,
+        doubleThrowActive: false,
+        rematchVotes: new Set(),
+        resetTimeout: null,
+      });
+    }
+
+    const br = battleRooms.get(roomId);
+    // If room exists but is empty, make rejoining player the host
+    if (br.players.size === 0) br.host = socket.id;
+    if (br.players.has(socket.id)) {
+      // Rejoin — resend state
+      socket.join(roomId);
+      socket.emit("battle_room_state", {
+        players: Array.from(br.players.values()),
+        host: br.host,
+        started: br.started,
+      });
+      return;
+    }
+    if (br.players.size >= 4) { socket.emit("battle_join_error", { error: "Room penuh (maks 4)" }); return; }
+
+    const slot = br.players.size;
+    const charType = slot % 2 === 0 ? "cat" : "dog";
+    br.players.set(socket.id, {
+      id: socket.id,
+      username,
+      character: charType,
+      x: BATTLE_SPAWN_X[slot] ?? 400,
+      hp: 100,
+      maxHp: 100,
+      alive: true,
+      powerUps: { big: true, double: true, explosive: true },
+      pigColor: pigColor || "pink",
+      slot,
+    });
+
+    socket.join(roomId);
+    lobbyPlayers.delete(socket.id);
+    broadcastLobby();
+    broadcastRooms();
+
+    io.to(roomId).emit("battle_room_state", {
+      players: Array.from(br.players.values()),
+      host: br.host,
+      started: br.started,
+    });
+  });
+
+  socket.on("battle_start", () => {
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || br.started || socket.id !== br.host || br.players.size < 2) return;
+    br.started = true;
+    br.gameOver = false;
+    br.doubleThrowActive = false;
+    br.currentTurnId = Array.from(br.players.keys())[0];
+    io.to(currentBattleRoom).emit("battle_game_start", {
+      players: Array.from(br.players.values()),
+      currentTurnId: br.currentTurnId,
+    });
+  });
+
+  socket.on("battle_move", ({ x }) => {
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || !br.started || socket.id !== br.currentTurnId) return;
+    const p = br.players.get(socket.id);
+    if (!p || !p.alive) return;
+    const minX = p.character === "dog" ? 415 : 50;
+    const maxX = p.character === "cat" ? 385 : 750;
+    p.x = Math.max(minX, Math.min(maxX, x));
+    socket.to(currentBattleRoom).emit("battle_player_moved", { id: socket.id, x: p.x });
+  });
+
+  socket.on("battle_throw", ({ angle, power, powerUp, startX }) => {
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || !br.started || socket.id !== br.currentTurnId) return;
+    const p = br.players.get(socket.id);
+    if (!p || !p.alive) return;
+    if (powerUp && p.powerUps[powerUp]) p.powerUps[powerUp] = false;
+    if (powerUp === "double" && !br.doubleThrowActive) br.doubleThrowActive = true;
+    io.to(currentBattleRoom).emit("battle_projectile", {
+      throwerId: socket.id,
+      angle,
+      power,
+      powerUp: powerUp || null,
+      startX,
+    });
+  });
+
+  socket.on("battle_throw_result", ({ hits }) => {
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || !br.started || socket.id !== br.currentTurnId) return;
+
+    const safeHits = Array.isArray(hits) ? hits : [];
+    safeHits.forEach(({ targetId, damage }) => {
+      const t = br.players.get(targetId);
+      if (t && t.alive) {
+        t.hp = Math.max(0, t.hp - Math.round(damage));
+        if (t.hp <= 0) { t.hp = 0; t.alive = false; }
+      }
+    });
+
+    const alive = Array.from(br.players.values()).filter((p) => p.alive);
+
+    // Double throw — intermediate state: don't advance turn yet
+    if (br.doubleThrowActive) {
+      br.doubleThrowActive = false;
+      io.to(currentBattleRoom).emit("battle_state_update", {
+        players: Array.from(br.players.values()),
+        currentTurnId: br.currentTurnId,
+        hits: safeHits,
+        awaitingDouble: true,
+      });
+      return;
+    }
+
+    // Game over?
+    if (alive.length <= 1) {
+      br.gameOver = true;
+      br.started = false;
+      const winner = alive[0] ?? Array.from(br.players.values()).sort((a, b) => b.hp - a.hp)[0];
+      io.to(currentBattleRoom).emit("battle_game_over", {
+        winnerId: winner?.id ?? null,
+        winnerName: winner?.username ?? "?",
+        players: Array.from(br.players.values()),
+      });
+      br.resetTimeout = setTimeout(() => resetBattleRoom(br, currentBattleRoom), 60_000);
+      return;
+    }
+
+    const nextId = getNextBattleTurn(br);
+    br.currentTurnId = nextId;
+    io.to(currentBattleRoom).emit("battle_state_update", {
+      players: Array.from(br.players.values()),
+      currentTurnId: nextId,
+      hits: safeHits,
+      awaitingDouble: false,
+    });
+  });
+
+  socket.on("battle_vote_rematch", () => {
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || !br.gameOver) return;
+    br.rematchVotes.add(socket.id);
+    const votes = br.rematchVotes.size;
+    const total = br.players.size;
+    io.to(currentBattleRoom).emit("battle_rematch_votes", { votes, total });
+    if (votes >= total && total >= 2) resetBattleRoom(br, currentBattleRoom);
+  });
+
+  socket.on("battle_pick_slot", ({ slot }) => {
+    if (!currentBattleRoom) {
+      for (const [rid, br] of battleRooms.entries()) {
+        if (br.players.has(socket.id)) { currentBattleRoom = rid; break; }
+      }
+    }
+    if (!currentBattleRoom) return;
+    const br = battleRooms.get(currentBattleRoom);
+    if (!br || br.started) return;
+    const me = br.players.get(socket.id);
+    if (!me) return;
+    const slotNum = parseInt(slot, 10);
+    if (isNaN(slotNum) || slotNum < 0 || slotNum > 3) return;
+    // Reject if slot is taken by someone else
+    const occupant = Array.from(br.players.values()).find(
+      (p) => p.slot === slotNum && p.id !== socket.id
+    );
+    if (occupant) return;
+    me.slot = slotNum;
+    me.x = BATTLE_SPAWN_X[slotNum] ?? 400;
+    me.character = slotNum % 2 === 0 ? "cat" : "dog";
+    io.to(currentBattleRoom).emit("battle_room_state", {
+      players: Array.from(br.players.values()),
+      host: br.host,
+      started: br.started,
+    });
   });
 
   socket.on("disconnect", () => {
@@ -453,41 +712,92 @@ io.on("connection", (socket) => {
     }
     broadcastLobby();
 
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room) return;
-    room.rematchVotes.delete(socket.id);
-    room.players.delete(socket.id);
-    io.to(currentRoom).emit("player_left", { id: socket.id });
+    // ── Regular room cleanup ────────────────────────────────────────────
+    if (currentRoom) {
+      const room = rooms.get(currentRoom);
+      if (room) {
+        room.rematchVotes.delete(socket.id);
+        room.players.delete(socket.id);
+        io.to(currentRoom).emit("player_left", { id: socket.id });
+        broadcastRooms();
 
-    if (room.players.size === 0) {
-      rooms.delete(currentRoom);
-      return;
+        if (room.players.size === 0) {
+          rooms.delete(currentRoom);
+        } else {
+          // Broadcast updated rematch count if in rematch phase
+          if (room.gameOver) {
+            io.to(currentRoom).emit("rematch_votes", {
+              votes: room.rematchVotes.size,
+              total: room.players.size,
+            });
+          }
+
+          if (room.host === socket.id) {
+            const nextHost = Array.from(room.players.values())[0];
+            room.host = nextHost.id;
+            room.players.forEach((p, pid) => {
+              p.slot = Array.from(room.players.keys()).indexOf(pid);
+            });
+            io.to(currentRoom).emit("room_state", {
+              players: Array.from(room.players.values()),
+              started: room.started,
+              host: room.host,
+              speed: room.speed,
+            });
+          }
+        }
+      }
     }
 
-    // Broadcast updated rematch count if in rematch phase
-    if (room.gameOver) {
-      io.to(currentRoom).emit("rematch_votes", {
-        votes: room.rematchVotes.size,
-        total: room.players.size,
-      });
-    }
+    // ── Battle room cleanup ─────────────────────────────────────────────
+    if (currentBattleRoom) {
+      const br = battleRooms.get(currentBattleRoom);
+      if (br) {
+        br.players.delete(socket.id);
+        io.to(currentBattleRoom).emit("battle_player_left", { id: socket.id });
+        broadcastRooms();
 
-    if (room.host === socket.id) {
-      const nextHost = Array.from(room.players.values())[0];
-      room.host = nextHost.id;
-      room.players.forEach((p, pid) => {
-        p.slot = Array.from(room.players.keys()).indexOf(pid);
-      });
-      io.to(currentRoom).emit("room_state", {
-        players: Array.from(room.players.values()),
-        started: room.started,
-        host: room.host,
-        speed: room.speed,
-      });
+        if (br.players.size === 0) {
+          if (br.resetTimeout) clearTimeout(br.resetTimeout);
+          battleRooms.delete(currentBattleRoom);
+        } else {
+          if (br.host === socket.id) {
+            br.host = Array.from(br.players.keys())[0];
+          }
+          // If disconnected player was the current turn, skip to next
+          if (br.started && !br.gameOver && br.currentTurnId === socket.id) {
+            const nextId = getNextBattleTurn(br);
+            br.currentTurnId = nextId;
+            const alive = Array.from(br.players.values()).filter((p) => p.alive);
+            if (alive.length <= 1) {
+              br.gameOver = true; br.started = false;
+              const winner = alive[0] ?? null;
+              io.to(currentBattleRoom).emit("battle_game_over", {
+                winnerId: winner?.id ?? null,
+                winnerName: winner?.username ?? "?",
+                players: Array.from(br.players.values()),
+              });
+              br.resetTimeout = setTimeout(() => resetBattleRoom(br, currentBattleRoom), 60_000);
+            } else {
+              io.to(currentBattleRoom).emit("battle_state_update", {
+                players: Array.from(br.players.values()),
+                currentTurnId: nextId,
+                hits: [],
+                awaitingDouble: false,
+              });
+            }
+          }
+          io.to(currentBattleRoom).emit("battle_room_state", {
+            players: Array.from(br.players.values()),
+            host: br.host,
+            started: br.started,
+          });
+        }
+      }
     }
   });
 });
+
 
 // ── Start ──────────────────────────────────────────────────────────────────
 app.prepare().then(() => {

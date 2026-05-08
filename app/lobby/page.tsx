@@ -67,6 +67,16 @@ interface LobbyMsg {
   ts: number;
 }
 
+interface RoomItem {
+  id: string;
+  host: string;
+  playerCount: number;
+  gameMode: string;
+  speed: number;
+  hasPassword: boolean;
+  started: boolean;
+}
+
 export default function LobbyPage() {
   const [user, setUser] = useState<User | null>(null);
   const [pigColor, setPigColorState] = useState("pink");
@@ -84,6 +94,24 @@ export default function LobbyPage() {
   // Room creation flow
   const [myRoom, setMyRoom] = useState<string | null>(null);
   const [joinId, setJoinId] = useState("");
+
+  // Battle room
+  const [battleRoom, setBattleRoom] = useState<string | null>(null);
+  const [joinBattleId, setJoinBattleId] = useState("");
+
+  // Room list
+  const [roomList, setRoomList] = useState<RoomItem[]>([]);
+
+  // Password for creating a room
+  const [createPasswordEnabled, setCreatePasswordEnabled] = useState(false);
+  const [createPassword, setCreatePassword] = useState("");
+
+  // Password for joining by code
+  const [joinPassword, setJoinPassword] = useState("");
+
+  // Join from room list: null = no pending, otherwise the room clicked
+  const [pendingJoinRoom, setPendingJoinRoom] = useState<RoomItem | null>(null);
+  const [listJoinPassword, setListJoinPassword] = useState("");
 
   // Invite accepted → navigate
   const [pendingRoom, setPendingRoom] = useState<{
@@ -249,6 +277,9 @@ export default function LobbyPage() {
       socket.on("lobby_chat_history", (msgs: LobbyMsg[]) => {
         setLobbyChat(msgs.slice(-100));
       });
+      socket.on("room_list", (list: RoomItem[]) => {
+        setRoomList(list);
+      });
     });
 
     return () => {
@@ -278,18 +309,52 @@ export default function LobbyPage() {
     if (!myRoom) return;
     socketRef.current?.emit("lobby_leave");
     const modeParam = gameMode === "dino" ? "multi-dino" : "multi";
-    router.push(`/game?mode=${modeParam}&room=${myRoom}&speed=${speed}`);
+    const pw = createPasswordEnabled && createPassword
+      ? `&pw=${encodeURIComponent(createPassword)}`
+      : "";
+    router.push(`/game?mode=${modeParam}&room=${myRoom}&speed=${speed}${pw}`);
   }
 
   function cancelRoom() {
     setMyRoom(null);
+    setCreatePassword("");
+    setCreatePasswordEnabled(false);
   }
 
   function joinRoom() {
     if (!joinId.trim()) return;
     socketRef.current?.emit("lobby_leave");
     const modeParam = joinGameMode === "dino" ? "multi-dino" : "multi";
-    router.push(`/game?mode=${modeParam}&room=${joinId.trim().toUpperCase()}`);
+    const pw = joinPassword ? `&pw=${encodeURIComponent(joinPassword)}` : "";
+    router.push(`/game?mode=${modeParam}&room=${joinId.trim().toUpperCase()}${pw}`);
+  }
+
+  function joinFromList(room: RoomItem, pw?: string) {
+    socketRef.current?.emit("lobby_leave");
+    if (room.gameMode === "battle") {
+      router.push(`/battle?room=${room.id}`);
+      return;
+    }
+    const modeParam = room.gameMode === "dino" ? "multi-dino" : "multi";
+    const pwParam = pw ? `&pw=${encodeURIComponent(pw)}` : "";
+    router.push(`/game?mode=${modeParam}&room=${room.id}&speed=${room.speed}${pwParam}`);
+  }
+
+  function createBattleRoom() {
+    const id = uuidv4().substring(0, 8).toUpperCase();
+    setBattleRoom(id);
+  }
+
+  function enterBattleRoom() {
+    if (!battleRoom) return;
+    socketRef.current?.emit("lobby_leave");
+    router.push(`/battle?room=${battleRoom}`);
+  }
+
+  function joinBattleRoom() {
+    if (!joinBattleId.trim()) return;
+    socketRef.current?.emit("lobby_leave");
+    router.push(`/battle?room=${joinBattleId.trim().toUpperCase()}`);
   }
 
   function invitePlayer(toId: string, _toUsername: string) {
@@ -352,6 +417,59 @@ export default function LobbyPage() {
             </p>
             <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
               <div className="h-full bg-pink-500 animate-[shrink_3s_linear_forwards] rounded-full" style={{ width: "100%" }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password modal: join room from list */}
+      {pendingJoinRoom && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 flex flex-col gap-4 w-full max-w-xs">
+            <div className="text-center">
+              <div className="text-3xl mb-1">🔒</div>
+              <p className="font-extrabold text-gray-800 text-base">Room Terkunci</p>
+              <p className="text-gray-500 text-xs mt-1">
+                Room{" "}
+                <span className="font-mono font-bold text-gray-700">
+                  {pendingJoinRoom.id}
+                </span>{" "}
+                dilindungi password.
+              </p>
+            </div>
+            <input
+              type="text"
+              placeholder="Masukkan password..."
+              value={listJoinPassword}
+              onChange={(e) => setListJoinPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && listJoinPassword.trim()) {
+                  joinFromList(pendingJoinRoom, listJoinPassword.trim());
+                  setPendingJoinRoom(null);
+                }
+              }}
+              autoFocus
+              maxLength={20}
+              className="w-full px-4 py-2.5 rounded-xl border-2 border-gray-200 focus:border-pink-400 outline-none text-gray-700 text-sm"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => setPendingJoinRoom(null)}
+                className="flex-1 py-2 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold text-sm transition active:scale-95"
+              >
+                Batal
+              </button>
+              <button
+                onClick={() => {
+                  if (!listJoinPassword.trim()) return;
+                  joinFromList(pendingJoinRoom, listJoinPassword.trim());
+                  setPendingJoinRoom(null);
+                }}
+                disabled={!listJoinPassword.trim()}
+                className="flex-1 py-2 rounded-xl bg-green-500 hover:bg-green-400 disabled:opacity-50 text-white font-bold text-sm transition active:scale-95"
+              >
+                Masuk
+              </button>
             </div>
           </div>
         </div>
@@ -573,6 +691,30 @@ export default function LobbyPage() {
                     Salin
                   </button>
                 </div>
+
+                {/* Password option */}
+                <div className="mb-3">
+                  <label className="flex items-center gap-2 text-white/70 text-xs cursor-pointer select-none mb-1">
+                    <input
+                      type="checkbox"
+                      checked={createPasswordEnabled}
+                      onChange={(e) => setCreatePasswordEnabled(e.target.checked)}
+                      className="accent-green-400"
+                    />
+                    🔒 Lindungi dengan password
+                  </label>
+                  {createPasswordEnabled && (
+                    <input
+                      type="text"
+                      placeholder="Tulis password room..."
+                      value={createPassword}
+                      onChange={(e) => setCreatePassword(e.target.value)}
+                      maxLength={20}
+                      className="w-full px-3 py-1.5 rounded-xl bg-white/80 text-gray-700 text-sm outline-none focus:ring-2 focus:ring-green-300"
+                    />
+                  )}
+                </div>
+
                 <p className="text-white/60 text-xs mb-3">
                   Undang pemain di bawah atau bagikan kode room.
                 </p>
@@ -612,7 +754,7 @@ export default function LobbyPage() {
                   👶 Dino
                 </button>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 mb-2">
                 <input
                   type="text"
                   placeholder="Kode room..."
@@ -628,6 +770,14 @@ export default function LobbyPage() {
                   Join
                 </button>
               </div>
+              <input
+                type="text"
+                placeholder="Password room (jika ada)..."
+                value={joinPassword}
+                onChange={(e) => setJoinPassword(e.target.value)}
+                maxLength={20}
+                className="w-full px-3 py-1.5 rounded-xl bg-white/70 text-gray-700 text-sm outline-none focus:ring-2 focus:ring-blue-300"
+              />
             </div>
 
             <a
@@ -636,6 +786,172 @@ export default function LobbyPage() {
             >
               🏆 Leaderboard
             </a>
+          </div>
+        </div>
+
+        {/* Available Rooms */}
+        <div className="bg-white/20 backdrop-blur-md rounded-3xl p-5 shadow-2xl">
+          <div className="flex items-center gap-2 mb-3">
+            <h2 className="text-white font-bold text-base flex-1">🏠 Room Tersedia</h2>
+            <span className="bg-white/20 text-yellow-200 text-xs font-bold px-2 py-0.5 rounded-full">
+              {roomList.filter((r) => !r.started && r.gameMode !== "battle").length}
+            </span>
+          </div>
+          {roomList.filter((r) => !r.started && r.gameMode !== "battle").length === 0 ? (
+            <p className="text-white/50 text-sm text-center py-3">
+              Belum ada room yang menunggu pemain...
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+              {roomList
+                .filter((r) => !r.started && r.gameMode !== "battle")
+                .map((room) => (
+                  <div
+                    key={room.id}
+                    className="flex items-center justify-between bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2.5 transition"
+                  >
+                    <div className="flex flex-col min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-yellow-200 font-extrabold text-sm tracking-wider">
+                          {room.id}
+                        </span>
+                        {room.hasPassword && (
+                          <span className="text-xs bg-orange-400/80 text-white px-1.5 py-0.5 rounded-full font-bold">
+                            🔒
+                          </span>
+                        )}
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full ${room.gameMode === "battle" ? "bg-red-500/80 text-white font-bold" : "bg-white/20 text-white/70"}`}>
+                          {room.gameMode === "battle" ? "⚔️ Battle" : room.gameMode === "dino" ? "👶 Dino" : "🐷 Flappy"}
+                        </span>
+                        {room.gameMode !== "battle" && (
+                          <span className="text-xs bg-white/20 text-white/70 px-1.5 py-0.5 rounded-full">
+                            ⚡ {room.speed}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-white/60 text-xs mt-0.5">
+                        Host: <span className="text-white/80 font-semibold">{room.host}</span>
+                        {" · "}
+                        <span>{room.playerCount} pemain</span>
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (room.hasPassword) {
+                          setPendingJoinRoom(room);
+                          setListJoinPassword("");
+                        } else {
+                          joinFromList(room);
+                        }
+                      }}
+                      className="ml-2 shrink-0 px-3 py-1.5 bg-green-500 hover:bg-green-400 text-white text-xs font-bold rounded-lg transition active:scale-95"
+                    >
+                      Masuk
+                    </button>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+
+        {/* Battle Mode */}
+        <div className="bg-white/20 backdrop-blur-md rounded-3xl p-5 shadow-2xl">
+          <h2 className="text-white font-extrabold text-base mb-3 flex items-center gap-2">
+            ⚔️ Cat vs Dog Battle
+            <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">NEW</span>
+          </h2>
+          <p className="text-white/60 text-xs mb-4">
+            Turn-based battle 2–4 pemain: lempar bambu, pakai power-up, habiskan HP lawan!
+          </p>
+          <div className="flex flex-col gap-3">
+            {!battleRoom ? (
+              <button
+                onClick={createBattleRoom}
+                className="py-3 bg-linear-to-r from-red-500 to-orange-500 hover:from-red-400 hover:to-orange-400 text-white font-bold rounded-2xl shadow-lg transition active:scale-95"
+              >
+                ⚔️ Buat Battle Room
+              </button>
+            ) : (
+              <div className="bg-white/10 rounded-2xl p-4 border border-white/30">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-white font-bold text-sm">⚔️ Battle Room aktif</p>
+                  <button
+                    onClick={() => setBattleRoom(null)}
+                    className="text-white/50 hover:text-white text-xs underline"
+                  >
+                    Batalkan
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="font-mono bg-white/20 text-yellow-200 font-extrabold px-3 py-1.5 rounded-lg flex-1 text-center text-xl tracking-widest">
+                    {battleRoom}
+                  </span>
+                  <button
+                    onClick={() => navigator.clipboard?.writeText(battleRoom).catch(() => {})}
+                    className="px-3 py-1.5 bg-white/20 hover:bg-white/30 text-white text-xs font-bold rounded-lg transition"
+                  >
+                    Salin
+                  </button>
+                </div>
+                <button
+                  onClick={enterBattleRoom}
+                  className="w-full py-2.5 bg-red-500 hover:bg-red-400 text-white font-bold rounded-xl transition active:scale-95"
+                >
+                  ▶️ Masuk ke Battle Room
+                </button>
+              </div>
+            )}
+
+            <div className="bg-white/10 rounded-2xl p-3">
+              <p className="text-white/80 text-xs font-semibold mb-2">🔗 Gabung battle dengan kode</p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Kode battle room..."
+                  value={joinBattleId}
+                  onChange={(e) => setJoinBattleId(e.target.value.toUpperCase())}
+                  maxLength={8}
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/80 text-gray-700 font-mono font-bold text-base tracking-widest outline-none focus:ring-2 focus:ring-red-300"
+                />
+                <button
+                  onClick={joinBattleRoom}
+                  className="px-4 py-2 bg-red-500 hover:bg-red-400 text-white font-bold rounded-xl transition active:scale-95"
+                >
+                  Join
+                </button>
+              </div>
+            </div>
+
+            {roomList.filter(r => r.gameMode === "battle" && !r.started).length > 0 && (
+              <div className="bg-white/10 rounded-2xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <p className="text-white/80 text-xs font-semibold flex-1">⚔️ Room Battle Tersedia</p>
+                  <span className="bg-red-500/80 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                    {roomList.filter(r => r.gameMode === "battle" && !r.started).length}
+                  </span>
+                </div>
+                <div className="flex flex-col gap-2 max-h-48 overflow-y-auto">
+                  {roomList.filter(r => r.gameMode === "battle" && !r.started).map(room => (
+                    <div key={room.id} className="flex items-center justify-between bg-white/10 hover:bg-white/20 rounded-xl px-3 py-2 transition">
+                      <div className="flex flex-col min-w-0">
+                        <span className="font-mono text-yellow-200 font-extrabold text-sm tracking-wider">{room.id}</span>
+                        <p className="text-white/60 text-xs mt-0.5">
+                          Host: <span className="text-white/80 font-semibold">{room.host}</span>
+                          {" · "}
+                          <span>{room.playerCount}/4 pemain</span>
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => joinFromList(room)}
+                        className="ml-2 shrink-0 px-3 py-1.5 bg-red-500 hover:bg-red-400 text-white text-xs font-bold rounded-lg transition active:scale-95"
+                      >
+                        Join
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
