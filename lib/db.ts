@@ -42,6 +42,22 @@ export async function initDB() {
       blocked_by VARCHAR(32),
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS profiles (
+      neon_auth_user_id VARCHAR(128) PRIMARY KEY,
+      username VARCHAR(32) UNIQUE NOT NULL,
+      character VARCHAR(16) DEFAULT 'pig',
+      pig_color VARCHAR(16) DEFAULT 'pink',
+      is_admin BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS profile_scores (
+      id SERIAL PRIMARY KEY,
+      profile_id VARCHAR(128) REFERENCES profiles(neon_auth_user_id) ON DELETE CASCADE,
+      score INTEGER NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
   // Safe migrations — columns added only if missing
   await pool.query(`
