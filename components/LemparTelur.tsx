@@ -437,11 +437,16 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
         else if (o.state === "resting") { o.x = platCX(o.platformLevel, elapsed); o.worldY = platWY(o.platformLevel); }
       }
 
-      // ── Camera: follow highest alive ───────────────────────────────
-      let highY = (gs.myState === "dead") ? -Infinity : gs.worldY;
-      for (const o of gs.others.values()) if (o.state !== "dead") highY = Math.max(highY, o.worldY);
-      if (highY === -Infinity) highY = gs.worldY;
-      gs.camY += (highY - H * 0.65 - gs.camY) * CAM_LERP;
+      // ── Camera: own egg when alive, highest alive other when spectating ──
+      let camTarget: number;
+      if (gs.myState !== "dead") {
+        camTarget = gs.worldY; // first-person: follow own egg
+      } else {
+        let highY = -Infinity;
+        for (const o of gs.others.values()) if (o.state !== "dead") highY = Math.max(highY, o.worldY);
+        camTarget = highY === -Infinity ? gs.worldY : highY;
+      }
+      gs.camY += (camTarget - H * 0.55 - gs.camY) * CAM_LERP;
 
       // ── Highest level for zone colour ──────────────────────────────
       let visLv = gs.platformLevel;
