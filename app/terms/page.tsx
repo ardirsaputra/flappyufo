@@ -1,6 +1,6 @@
 export default function TermsPage() {
   return (
-    <div className="min-h-screen bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 px-4 py-10">
+    <div className="min-h-screen bg-linear-to-br from-[#8f6c2f] via-[#C4955A] to-[#8B5E3C] px-4 py-10">
       <div className="max-w-2xl mx-auto bg-white/20 backdrop-blur-md rounded-3xl p-8 shadow-2xl text-white">
         <div className="mb-6">
           <a href="/lobby" className="text-white/70 hover:text-white text-sm underline">← Kembali</a>
