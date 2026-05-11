@@ -434,7 +434,11 @@ export default function LobbyPage() {
   const charEmoji = CHARACTERS.find((c) => c.id === character)?.emoji ?? "🐷";
 
   return (
-    <div className="min-h-screen flex flex-col items-center bg-gradient-to-br from-[#9b7634] via-[#C4955A] to-[#8B5E3C] p-3 pb-6">
+    <div className="min-h-screen flex flex-col items-center bg-gray-950 p-3 pb-8 relative overflow-x-hidden font-sans">
+      {/* Background Orbs for premium modern feel */}
+      <div className="fixed top-[-10%] left-[-10%] w-[60vw] h-[60vw] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none mix-blend-screen" />
+      <div className="fixed bottom-[-10%] right-[-10%] w-[60vw] h-[60vw] bg-pink-600/20 rounded-full blur-[120px] pointer-events-none mix-blend-screen" />
+      <div className="fixed top-[30%] left-[20%] w-[40vw] h-[40vw] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none mix-blend-screen" />
       {/* Session kicked overlay */}
       {sessionKicked && (
         <div className="fixed inset-0 z-100 bg-black/70 flex items-center justify-center p-4">
@@ -554,9 +558,10 @@ export default function LobbyPage() {
         </div>
       )}
 
-      <div className="flex flex-col gap-3 w-full max-w-md">
+      <div className="relative z-10 flex flex-col gap-4 w-full max-w-md mt-2">
         {/* ── Profile Header ── */}
-        <div className="bg-white/20 backdrop-blur-md rounded-3xl shadow-2xl overflow-hidden">
+        <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden relative group">
+          <div className="absolute inset-0 bg-linear-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition duration-500 pointer-events-none" />
           <div className="flex items-center gap-3 px-4 py-3">
             <div
               className="w-11 h-11 rounded-full border-[3px] border-white/70 flex items-center justify-center text-xl shrink-0"
@@ -603,14 +608,14 @@ export default function LobbyPage() {
           </div>
 
           {/* Character picker — always visible */}
-          <div className="px-4 pb-3 border-t border-white/10 pt-3">
+          <div className="px-5 pb-4 border-t border-white/5 pt-4">
             <p className="text-white/70 text-xs mb-2">🎮 Pilih karakter:</p>
             <div className="grid grid-cols-4 gap-2">
               {CHARACTERS.map((c) => (
                 <button
                   key={c.id}
                   onClick={() => changeCharacter(c.id)}
-                  className={`flex flex-col items-center justify-center py-2 rounded-xl text-xl transition active:scale-90 ${character === c.id ? "bg-white/40 ring-2 ring-white" : "bg-white/10 hover:bg-white/20"}`}
+                  className={`flex flex-col items-center justify-center py-2.5 rounded-2xl text-2xl transition-all duration-300 active:scale-90 ${character === c.id ? "bg-white/20 ring-1 ring-white/50 shadow-[0_0_15px_rgba(255,255,255,0.2)]" : "bg-white/5 hover:bg-white/10"}`}
                 >
                   <span>{c.emoji}</span>
                   <span className="text-white text-xs font-bold mt-0.5">
@@ -651,7 +656,7 @@ export default function LobbyPage() {
         </div>
 
         {/* ── Tab Navigation ── */}
-        <div className="bg-white/20 backdrop-blur-md rounded-3xl shadow-2xl overflow-hidden">
+        <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden relative">
           <div className="flex border-b border-white/15">
             {(["solo", "multi", "battle", "egg"] as ActiveTab[]).map((tab) => {
               const labels: Record<ActiveTab, string> = {
@@ -1251,7 +1256,7 @@ export default function LobbyPage() {
         </div>
 
         {/* ── Online Players ── */}
-        <div className="bg-white/20 backdrop-blur-md rounded-3xl p-4 shadow-2xl">
+        <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-5 shadow-2xl relative">
           <div className="flex items-center gap-2 mb-2">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
             <h2 className="text-white font-bold text-sm flex-1">
@@ -1311,7 +1316,7 @@ export default function LobbyPage() {
         </div>
 
         {/* ── Chat ── */}
-        <div className="bg-white/20 backdrop-blur-md rounded-3xl shadow-2xl overflow-hidden">
+        <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] shadow-2xl overflow-hidden relative">
           <button
             onClick={() =>
               setShowChat((v) => {
@@ -1400,7 +1405,7 @@ export default function LobbyPage() {
         {/* Discussion CTA */}
         <a
           href="/discussion"
-          className="flex items-center justify-center gap-2 w-full py-3 bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-2xl shadow-lg transition active:scale-95 text-white font-bold text-sm"
+          className="flex items-center justify-center gap-2 w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 backdrop-blur-xl rounded-[1.5rem] shadow-lg transition-all active:scale-95 text-white font-bold text-sm"
         >
           💬 Forum Diskusi Pengembangan
         </a>

@@ -256,116 +256,103 @@ export default function BattleGame({
   ) {
     ctx.globalAlpha = dead ? 0.38 : 1;
     const dk = shade(color, -45);
+    const w = 36;
+    const h = 42;
+    const bx = x - w / 2;
+    const by = base - h - 5; // feet take up ~5px
 
     // tail
     ctx.strokeStyle = color;
     ctx.lineWidth = 5;
     ctx.lineCap = "round";
     ctx.beginPath();
-    const tx = fr ? x - 16 : x + 16;
-    ctx.moveTo(tx, base - 22);
+    const tx = fr ? x - 12 : x + 12;
+    ctx.moveTo(tx, base - 20);
     ctx.bezierCurveTo(
       tx + (fr ? -24 : 24),
-      base - 12,
+      base - 10,
       tx + (fr ? -32 : 32),
-      base - 44,
+      base - 40,
       tx + (fr ? -22 : 22),
-      base - 58,
+      base - 50,
     );
     ctx.stroke();
     ctx.lineCap = "butt";
 
-    // body
-    ctx.fillStyle = color;
-    rr(ctx, x - 15, base - 40, 30, 32, 7);
-    ctx.fill();
-
-    // head
+    // Ears
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.arc(x, base - 52, 15, 0, Math.PI * 2);
+    ctx.moveTo(bx + w * 0.1, by + h * 0.2);
+    ctx.lineTo(bx + w * 0.25, by - h * 0.15);
+    ctx.lineTo(bx + w * 0.4, by + h * 0.1);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(bx + w * 0.9, by + h * 0.2);
+    ctx.lineTo(bx + w * 0.75, by - h * 0.15);
+    ctx.lineTo(bx + w * 0.6, by + h * 0.1);
     ctx.fill();
 
-    // ears
-    ctx.fillStyle = dk;
-    (
-      [
-        [x - 10, base - 62, x - 17, base - 77, x - 3, base - 62],
-        [x + 3, base - 62, x + 17, base - 77, x + 10, base - 62],
-      ] as number[][]
-    ).forEach(([ax, ay, bx, by, cx, cy]) => {
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.lineTo(cx, cy);
-      ctx.fill();
-    });
-    ctx.fillStyle = "rgba(255,140,140,0.75)";
-    (
-      [
-        [x - 10, base - 63, x - 14, base - 72, x - 4, base - 63],
-        [x + 4, base - 63, x + 14, base - 72, x + 10, base - 63],
-      ] as number[][]
-    ).forEach(([ax, ay, bx, by, cx, cy]) => {
-      ctx.beginPath();
-      ctx.moveTo(ax, ay);
-      ctx.lineTo(bx, by);
-      ctx.lineTo(cx, cy);
-      ctx.fill();
-    });
+    // Body Squircle
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, w, h, 14);
+    ctx.fill();
 
+    // Eyes
     const eo = fr ? 3 : -3;
-    ctx.fillStyle = dead ? "#555" : "#111";
-    [-6, 6].forEach((ox) => {
+    ctx.fillStyle = dead ? "#555" : "#222";
+    [-7, 7].forEach((ox) => {
       ctx.beginPath();
-      ctx.ellipse(
-        x + eo + ox,
-        base - 53,
-        2.5,
-        dead ? 1 : 3.5,
-        0,
-        0,
-        Math.PI * 2,
-      );
+      ctx.arc(x + eo + ox, by + h * 0.4, 3.5, 0, Math.PI * 2);
       ctx.fill();
     });
     if (!dead) {
       ctx.fillStyle = "#fff";
-      [-6, 6].forEach((ox) => {
+      [-7, 7].forEach((ox) => {
         ctx.beginPath();
-        ctx.arc(x + eo + ox + 1, base - 55, 1, 0, Math.PI * 2);
+        ctx.arc(x + eo + ox + 1, by + h * 0.35, 1.2, 0, Math.PI * 2);
         ctx.fill();
       });
     }
 
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    [-10, 10].forEach((ox) => {
+      ctx.beginPath();
+      ctx.ellipse(x + eo + ox, by + h * 0.55, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Snout
     ctx.fillStyle = "#f88";
     ctx.beginPath();
-    ctx.arc(x + eo * 0.5, base - 47, 2, 0, Math.PI * 2);
+    ctx.arc(x + eo, by + h * 0.5, 2, 0, Math.PI * 2);
     ctx.fill();
 
+    // Whiskers
     ctx.strokeStyle = dk;
     ctx.lineWidth = 1;
     [
-      [-10, -1],
-      [-10, -3],
-      [10, -1],
-      [10, -3],
+      [-12, -2],
+      [-12, 0],
+      [-12, 2],
+      [12, -2],
+      [12, 0],
+      [12, 2],
     ].forEach(([dx, dy]) => {
       ctx.beginPath();
-      ctx.moveTo(x + eo * 0.5, base - 47);
-      ctx.lineTo(x + eo * 0.5 + dx, base - 47 + dy);
+      ctx.moveTo(x + eo + (dx < 0 ? -4 : 4), by + h * 0.5);
+      ctx.lineTo(x + eo + dx, by + h * 0.5 + dy);
       ctx.stroke();
     });
 
+    // Feet
     ctx.fillStyle = color;
-    ctx.fillRect(x - 11, base - 10, 9, 10);
-    ctx.fillRect(x + 2, base - 10, 9, 10);
-    ctx.fillStyle = dk;
     ctx.beginPath();
-    ctx.ellipse(x - 6, base, 7, 4, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + 4, base - 5, 8, 5, 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(x + 6, base, 7, 4, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + w - 12, base - 5, 8, 5, 2);
     ctx.fill();
 
     ctx.globalAlpha = 1;
@@ -382,79 +369,98 @@ export default function BattleGame({
     ctx.globalAlpha = dead ? 0.38 : 1;
     const dk = shade(color, -50);
     const lt = shade(color, 30);
+    const w = 38;
+    const h = 44;
+    const bx = x - w / 2;
+    const by = base - h - 5;
 
-    // tail
+    // Tail
     ctx.strokeStyle = color;
     ctx.lineWidth = 6;
     ctx.lineCap = "round";
     ctx.beginPath();
-    const tx = fr ? x - 16 : x + 16;
-    ctx.moveTo(tx, base - 28);
+    const tx = fr ? x - 12 : x + 12;
+    ctx.moveTo(tx, base - 25);
     ctx.quadraticCurveTo(
-      tx + (fr ? -28 : 28),
+      tx + (fr ? -25 : 25),
+      base - 45,
+      tx + (fr ? -15 : 15),
       base - 55,
-      tx + (fr ? -18 : 18),
-      base - 68,
     );
     ctx.stroke();
     ctx.lineCap = "butt";
 
-    // body
+    // Body Squircle
     ctx.fillStyle = color;
-    rr(ctx, x - 17, base - 42, 34, 34, 9);
+    ctx.beginPath();
+    ctx.roundRect(bx, by, w, h, 14);
     ctx.fill();
 
-    // head
-    ctx.fillStyle = color;
-    rr(ctx, x - 16, base - 76, 32, 30, 9);
-    ctx.fill();
-    // snout
-    ctx.fillStyle = lt;
-    rr(ctx, x - 9, base - 56, 18, 14, 6);
-    ctx.fill();
-    // ears
+    // Floppy Ears
     ctx.fillStyle = dk;
-    rr(ctx, x - 24, base - 76, 11, 26, 5);
+    ctx.beginPath();
+    ctx.roundRect(bx - 4, by + h * 0.1, 8, h * 0.6, 4);
     ctx.fill();
-    rr(ctx, x + 13, base - 76, 11, 26, 5);
+    ctx.beginPath();
+    ctx.roundRect(bx + w - 4, by + h * 0.1, 8, h * 0.6, 4);
     ctx.fill();
 
+    // Eyes
     const eo = fr ? 3 : -3;
-    ctx.fillStyle = dead ? "#555" : "#111";
-    [-7, 7].forEach((ox) => {
+    ctx.fillStyle = dead ? "#555" : "#222";
+    [-8, 8].forEach((ox) => {
       ctx.beginPath();
-      ctx.arc(x + eo + ox, base - 65, dead ? 2 : 3, 0, Math.PI * 2);
+      ctx.arc(x + eo + ox, by + h * 0.35, 3.5, 0, Math.PI * 2);
       ctx.fill();
     });
     if (!dead) {
       ctx.fillStyle = "#fff";
-      [-7, 7].forEach((ox) => {
+      [-8, 8].forEach((ox) => {
         ctx.beginPath();
-        ctx.arc(x + eo + ox + 1, base - 66, 1, 0, Math.PI * 2);
+        ctx.arc(x + eo + ox + 1, by + h * 0.3, 1.2, 0, Math.PI * 2);
         ctx.fill();
       });
     }
 
-    ctx.fillStyle = dead ? "#888" : "#111";
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    [-12, 12].forEach((ox) => {
+      ctx.beginPath();
+      ctx.ellipse(x + eo + ox, by + h * 0.45, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+    });
+
+    // Snout
+    ctx.fillStyle = lt;
     ctx.beginPath();
-    ctx.ellipse(x + eo * 0.3, base - 50, 5, 4, 0, 0, Math.PI * 2);
+    ctx.roundRect(x + eo - 12, by + h * 0.5, 24, 16, 6);
     ctx.fill();
 
-    ctx.strokeStyle = dk;
-    ctx.lineWidth = 1.5;
+    // Nose
+    ctx.fillStyle = dead ? "#888" : "#222";
     ctx.beginPath();
-    ctx.arc(x + eo * 0.3, base - 48, 4, 0, Math.PI);
-    ctx.stroke();
+    ctx.ellipse(x + eo, by + h * 0.55, 5, 3.5, 0, 0, Math.PI * 2);
+    ctx.fill();
 
+    // Smile
+    if (!dead) {
+      ctx.strokeStyle = dk;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(x + eo - 3, by + h * 0.65, 3, 0, Math.PI);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x + eo + 3, by + h * 0.65, 3, 0, Math.PI);
+      ctx.stroke();
+    }
+
+    // Feet
     ctx.fillStyle = color;
-    ctx.fillRect(x - 13, base - 9, 10, 9);
-    ctx.fillRect(x + 3, base - 9, 10, 9);
-    ctx.fillStyle = dk;
     ctx.beginPath();
-    ctx.ellipse(x - 8, base, 9, 5, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + 4, base - 5, 10, 5, 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(x + 8, base, 9, 5, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + w - 14, base - 5, 10, 5, 2);
     ctx.fill();
 
     ctx.globalAlpha = 1;
@@ -1762,32 +1768,20 @@ export default function BattleGame({
   const isHost = uiHost === uiMyId;
 
   return (
-    <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-center p-2 gap-3">
-      {/* Header */}
-      <div className="flex items-center gap-3 w-full max-w-200">
-        <a
-          href="/lobby"
-          className="text-white/60 hover:text-white text-sm underline shrink-0"
-        >
-          ← Lobby
-        </a>
-        <span className="text-white font-bold text-base flex-1 text-center">
-          ⚔️ Cat vs Dog Battle
-        </span>
-        <span className="bg-white/10 text-yellow-200 font-mono text-xs px-2 py-1 rounded-full shrink-0">
-          {roomId}
-        </span>
-      </div>
-
+    <div className="flex-1 w-full flex flex-col items-center justify-center gap-3">
       {/* Waiting room */}
       {uiPhase === "waiting" && (
-        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-6 w-full max-w-md text-white shadow-2xl">
-          <h2 className="text-xl font-extrabold text-center mb-4">
-            ⚔️ Battle Room
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 w-full max-w-lg text-white shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-purple-500/30 blur-[50px] rounded-full pointer-events-none -mr-10 -mt-10" />
+          <div className="absolute bottom-0 left-0 w-40 h-40 bg-pink-500/30 blur-[50px] rounded-full pointer-events-none -ml-10 -mb-10" />
+
+          <h2 className="text-3xl font-black text-center mb-6 drop-shadow-lg">
+            ⚔️ <span className="bg-clip-text text-transparent bg-linear-to-r from-yellow-300 to-orange-400">Battle Room</span>
           </h2>
-          <div className="bg-white/10 rounded-2xl p-3 mb-4 text-center">
-            <p className="text-white/60 text-xs mb-1">Kode Room</p>
-            <p className="font-mono font-extrabold text-2xl tracking-widest text-yellow-200">
+          
+          <div className="bg-black/30 border border-white/10 rounded-2xl p-4 mb-6 text-center relative overflow-hidden">
+            <p className="text-white/60 text-xs font-bold uppercase tracking-wider mb-1">Kode Room</p>
+            <p className="font-mono font-black text-3xl tracking-[0.2em] text-yellow-300 drop-shadow-md">
               {roomId}
             </p>
           </div>
@@ -1823,7 +1817,7 @@ export default function BattleGame({
           })()}
 
           {/* Slot selection grid */}
-          <div className="grid grid-cols-2 gap-2 mb-5">
+          <div className="grid grid-cols-2 gap-3 mb-6 relative z-10">
             {[0, 1, 2, 3, 4, 5].map((slotIdx) => {
               const occupant = uiPlayers.find((p) => p.slot === slotIdx);
               const isMe = occupant?.id === uiMyId;
@@ -1837,32 +1831,34 @@ export default function BattleGame({
               return (
                 <div
                   key={slotIdx}
-                  className={`rounded-xl p-3 border-2 transition ${
+                  className={`relative overflow-hidden rounded-2xl p-3 border-2 transition-all duration-300 ${
                     isMine
-                      ? "bg-yellow-400/30 border-yellow-400"
+                      ? "bg-yellow-400/20 border-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.3)] scale-[1.02]"
                       : occupant
-                        ? "bg-white/10 border-white/20"
-                        : "bg-white/5 border-dashed border-white/20"
+                        ? "bg-black/40 border-white/10"
+                        : "bg-white/5 border-dashed border-white/20 hover:border-white/40 hover:bg-white/10"
                   }`}
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xl">{charEmoji}</span>
-                    <div>
-                      <p className="text-white font-bold text-xs">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-2xl shrink-0 ${isMine ? 'bg-yellow-400/30' : 'bg-white/10'}`}>
+                      {charEmoji}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-white/60 font-bold text-[10px] uppercase tracking-wider">
                         {charLabel} — {sideLabel}
                       </p>
                       {occupant ? (
-                        <p className="text-white/80 text-xs font-semibold truncate max-w-[100px]">
+                        <p className="text-white font-bold text-sm truncate">
                           {occupant.username}
                           {isMe && (
-                            <span className="text-green-300 ml-1">(Kamu)</span>
+                            <span className="text-green-400 ml-1 text-xs">(Kamu)</span>
                           )}
                           {occupant.id === uiHost && (
-                            <span className="text-yellow-300 ml-1">👑</span>
+                            <span className="text-yellow-400 ml-1" title="Host">👑</span>
                           )}
                         </p>
                       ) : (
-                        <p className="text-white/30 text-xs">Kosong</p>
+                        <p className="text-white/30 text-sm font-medium italic">Kosong</p>
                       )}
                     </div>
                   </div>
@@ -1873,15 +1869,17 @@ export default function BattleGame({
                           slot: slotIdx,
                         })
                       }
-                      className="w-full py-1 text-xs font-bold bg-white/20 hover:bg-white/30 text-white rounded-lg transition active:scale-95"
+                      className="w-full py-1.5 text-xs font-bold bg-white/10 hover:bg-white/25 text-white rounded-xl transition-all active:scale-95"
                     >
-                      Pilih Tempat
+                      + Pilih Posisi
                     </button>
                   )}
                   {isMine && (
-                    <p className="text-yellow-200 text-xs text-center font-bold">
-                      ✓ Posisimu
-                    </p>
+                    <div className="w-full py-1.5 bg-yellow-400/20 rounded-xl">
+                      <p className="text-yellow-300 text-xs text-center font-bold">
+                        ✓ Posisimu
+                      </p>
+                    </div>
                   )}
                 </div>
               );
@@ -1941,14 +1939,15 @@ export default function BattleGame({
       {uiPhase === "playing" && (
         <div className="w-full max-w-200 flex flex-col gap-2 px-2 select-none">
           {/* Row 1: Move ← → | Aim ↑↓ | Throw button */}
-          <div className="flex items-center gap-2">
-            {/* Move left / right */}
-            <div className="flex gap-1.5 shrink-0">
+          <div className="flex gap-2 mb-2 items-stretch h-[4.5rem]">
+            {/* Move Left / Right */}
+            <div className="flex gap-2 shrink-0">
               <button
-                className="w-16 h-16 rounded-2xl bg-white/25 active:bg-white/50 text-white text-2xl font-bold shadow-lg touch-none flex items-center justify-center"
+                className="w-16 rounded-2xl bg-white/10 border border-white/20 active:bg-white/30 active:scale-95 text-white text-2xl font-bold shadow-lg touch-none flex items-center justify-center transition-all backdrop-blur-md"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   gsRef.current.moveKeys.left = true;
+                  playSound("select");
                 }}
                 onPointerUp={() => {
                   gsRef.current.moveKeys.left = false;
@@ -1960,10 +1959,11 @@ export default function BattleGame({
                 ◀
               </button>
               <button
-                className="w-16 h-16 rounded-2xl bg-white/25 active:bg-white/50 text-white text-2xl font-bold shadow-lg touch-none flex items-center justify-center"
+                className="w-16 rounded-2xl bg-white/10 border border-white/20 active:bg-white/30 active:scale-95 text-white text-2xl font-bold shadow-lg touch-none flex items-center justify-center transition-all backdrop-blur-md"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   gsRef.current.moveKeys.right = true;
+                  playSound("select");
                 }}
                 onPointerUp={() => {
                   gsRef.current.moveKeys.right = false;
@@ -1977,10 +1977,11 @@ export default function BattleGame({
             </div>
 
             {/* Aim up / down + angle display */}
-            <div className="flex flex-col gap-1 shrink-0 items-center">
+            <div className="flex flex-col gap-1 shrink-0 items-center justify-between w-[4.5rem]">
               <button
-                className="px-4 py-2 rounded-xl bg-white/20 active:bg-white/40 text-white text-sm font-bold shadow-lg w-full"
+                className="flex-1 w-full rounded-xl bg-white/10 border border-white/20 active:bg-white/30 active:scale-95 text-white text-xs font-black shadow-lg flex items-center justify-center transition-all backdrop-blur-md"
                 onClick={() => {
+                  playSound("select");
                   const gs = gsRef.current;
                   if (gs.currentTurnId === gs.myId && !gs.projectile) {
                     gs.aimAngle = Math.min(85, gs.aimAngle + 5);
@@ -1988,14 +1989,15 @@ export default function BattleGame({
                   }
                 }}
               >
-                ↑ Sudut
+                ↑ NAIK
               </button>
-              <span className="text-yellow-200 font-bold text-sm leading-none">
+              <div className="text-yellow-300 font-black text-sm bg-black/40 rounded-lg px-2 py-[1px] border border-yellow-500/30 drop-shadow-[0_0_8px_rgba(253,224,71,0.5)] leading-none">
                 {uiAimAngle}°
-              </span>
+              </div>
               <button
-                className="px-4 py-2 rounded-xl bg-white/20 active:bg-white/40 text-white text-sm font-bold shadow-lg w-full"
+                className="flex-1 w-full rounded-xl bg-white/10 border border-white/20 active:bg-white/30 active:scale-95 text-white text-xs font-black shadow-lg flex items-center justify-center transition-all backdrop-blur-md"
                 onClick={() => {
+                  playSound("select");
                   const gs = gsRef.current;
                   if (gs.currentTurnId === gs.myId && !gs.projectile) {
                     gs.aimAngle = Math.max(5, gs.aimAngle - 5);
@@ -2003,19 +2005,22 @@ export default function BattleGame({
                   }
                 }}
               >
-                ↓ Sudut
+                ↓ TURUN
               </button>
             </div>
 
             {/* Throw — hold to charge, release to throw */}
             <button
-              className="flex-1 h-16 rounded-2xl bg-orange-500 active:bg-orange-700 text-white font-extrabold shadow-lg touch-none flex flex-col items-center justify-center gap-0.5"
-              onPointerDown={mobileStartCharge}
+              className="flex-1 rounded-2xl bg-linear-to-b from-orange-400 to-red-600 active:from-red-600 active:to-red-800 text-white font-black shadow-[0_0_20px_rgba(249,115,22,0.4)] active:scale-95 touch-none flex flex-col items-center justify-center gap-1 transition-all border border-white/20"
+              onPointerDown={(e) => {
+                playSound("select");
+                mobileStartCharge(e as any);
+              }}
               onPointerUp={mobileReleaseThrow}
               onPointerCancel={mobileCancelCharge}
             >
-              <span className="text-lg">💨 LEMPAR</span>
-              <span className="text-xs font-normal opacity-75">
+              <span className="text-lg tracking-wider uppercase drop-shadow-md">💨 LEMPAR</span>
+              <span className="text-[9px] font-bold text-white/80 uppercase tracking-widest bg-black/20 px-2 py-0.5 rounded-full">
                 Tahan → Lepas
               </span>
             </button>
@@ -2034,18 +2039,21 @@ export default function BattleGame({
               return (
                 <button
                   key={key}
-                  onClick={() => mobilePUSelect(key)}
+                  onClick={() => {
+                    playSound("select");
+                    mobilePUSelect(key);
+                  }}
                   disabled={!hasIt}
-                  className={`flex-1 py-3 rounded-2xl font-bold text-sm shadow-lg transition active:scale-95 flex flex-col items-center gap-0.5 ${
+                  className={`flex-1 py-2.5 rounded-2xl font-black text-[10px] shadow-lg transition-all duration-300 active:scale-95 flex flex-col items-center justify-center gap-1 border backdrop-blur-md uppercase tracking-wider ${
                     !hasIt
-                      ? "bg-white/10 text-white/30 cursor-not-allowed"
+                      ? "bg-black/40 border-white/5 text-white/20 cursor-not-allowed grayscale"
                       : isSelected
-                        ? "bg-yellow-400 text-gray-900 ring-2 ring-white"
-                        : "bg-white/25 hover:bg-white/35 text-white"
+                        ? "bg-linear-to-b from-yellow-300 to-yellow-500 border-yellow-200 text-black shadow-[0_0_15px_rgba(250,204,21,0.6)] scale-105"
+                        : "bg-white/10 border-white/20 text-white hover:bg-white/20"
                   }`}
                 >
-                  <span className="text-xl">{icon}</span>
-                  <span className="text-xs font-normal">{label}</span>
+                  <span className="text-xl drop-shadow-md leading-none">{icon}</span>
+                  <span className={isSelected ? "text-black/80" : "text-white/80"}>{label}</span>
                 </button>
               );
             })}
@@ -2055,19 +2063,23 @@ export default function BattleGame({
 
       {/* Game over */}
       {uiPhase === "gameover" && (
-        <div className="bg-white/10 backdrop-blur-md rounded-3xl p-8 w-full max-w-md text-white shadow-2xl text-center">
-          <div className="text-5xl mb-3">
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 w-full max-w-md text-white shadow-2xl text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-40 h-40 bg-yellow-500/30 blur-[50px] rounded-full pointer-events-none -mr-10 -mt-10" />
+          <div className="absolute bottom-0 left-0 w-40 h-40 bg-emerald-500/30 blur-[50px] rounded-full pointer-events-none -ml-10 -mb-10" />
+
+          <div className="text-6xl mb-4 drop-shadow-xl animate-bounce">
             {uiWinnerTeam === "cat"
               ? "🐱"
               : uiWinnerTeam === "dog"
                 ? "🐶"
                 : "🏆"}
           </div>
-          <h2 className="text-2xl font-extrabold mb-1">{uiWinner} Menang!</h2>
-          <p className="text-white/50 text-sm mb-5">
-            Cat vs Dog Battle selesai
+          <h2 className="text-3xl font-black mb-1 drop-shadow-lg text-transparent bg-clip-text bg-linear-to-br from-white to-gray-400">{uiWinner} Menang!</h2>
+          <p className="text-white/50 text-sm mb-6 font-medium">
+            Cat vs Dog Battle Selesai
           </p>
-          <div className="flex flex-col gap-2 mb-5">
+          
+          <div className="flex flex-col gap-3 mb-6 relative z-10">
             {[...uiPlayers]
               .sort(
                 (a, b) => (b.alive ? 1 : 0) - (a.alive ? 1 : 0) || b.hp - a.hp,
@@ -2079,50 +2091,65 @@ export default function BattleGame({
                 return (
                   <div
                     key={p.id}
-                    className={`flex items-center gap-3 rounded-xl px-4 py-2 ${isWinnerRow ? "bg-yellow-400/30 ring-1 ring-yellow-400" : "bg-white/10"}`}
+                    className={`flex items-center gap-4 rounded-2xl px-5 py-3 transition-transform ${isWinnerRow ? "bg-yellow-400/20 border border-yellow-400/50 shadow-[0_0_15px_rgba(250,204,21,0.2)] scale-[1.02]" : "bg-black/40 border border-white/5"}`}
                   >
-                    <span className="text-xl">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl shrink-0 ${isWinnerRow ? 'bg-yellow-400/30' : 'bg-white/10'}`}>
                       {p.character === "cat" ? "🐱" : "🐶"}
-                    </span>
-                    <span className="font-bold flex-1 text-left">
+                    </div>
+                    <span className="font-bold text-base flex-1 text-left truncate">
                       {p.username}
                       {uiWinnerTeam && p.character === uiWinnerTeam && (
-                        <span className="text-yellow-300 text-xs ml-1">🏆</span>
+                        <span className="text-yellow-400 text-sm ml-2" title="Winner">🏆</span>
                       )}
                     </span>
-                    <span
-                      className={`text-sm font-bold ${p.alive ? "text-green-300" : "text-red-400"}`}
-                    >
-                      {p.alive ? `${p.hp} HP` : "💀"}
-                    </span>
+                    <div className={`px-3 py-1 rounded-lg text-sm font-black ${p.alive ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                      {p.alive ? `${p.hp} HP` : "💀 MATI"}
+                    </div>
                   </div>
                 );
               })}
           </div>
-          <div className="text-white/60 text-sm mb-4">
-            Rematch: {rematchVotes.votes} / {rematchVotes.total} setuju
+          
+          <div className="bg-black/20 rounded-xl p-3 mb-5 relative z-10">
+            <div className="text-white/80 text-sm font-bold mb-1">
+              Rematch Votes
+            </div>
+            <div className="flex items-center justify-center gap-2">
+              <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-linear-to-r from-emerald-400 to-green-400 transition-all duration-500" 
+                  style={{ width: `${rematchVotes.total > 0 ? (rematchVotes.votes / rematchVotes.total) * 100 : 0}%` }}
+                />
+              </div>
+              <span className="text-xs font-mono font-bold text-white/60">{rematchVotes.votes}/{rematchVotes.total}</span>
+            </div>
           </div>
-          {!voted ? (
-            <button
-              onClick={() => {
-                socketRef.current?.emit("battle_vote_rematch");
-                setVoted(true);
-              }}
-              className="w-full py-3 bg-linear-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-extrabold rounded-2xl transition active:scale-95 shadow-lg mb-3"
+
+          <div className="relative z-10">
+            {!voted ? (
+              <button
+                onClick={() => {
+                  socketRef.current?.emit("battle_vote_rematch");
+                  setVoted(true);
+                }}
+                className="w-full py-4 bg-linear-to-r from-green-500 to-emerald-500 hover:from-green-400 hover:to-emerald-400 text-white font-black text-lg rounded-2xl transition-all active:scale-95 shadow-[0_5px_20px_rgba(16,185,129,0.3)] mb-4"
+              >
+                🔄 Main Lagi!
+              </button>
+            ) : (
+              <div className="w-full py-4 bg-white/5 border border-white/10 rounded-2xl mb-4">
+                <p className="text-green-400 font-bold">
+                  ✓ Votemu tercatat — menunggu yang lain...
+                </p>
+              </div>
+            )}
+            <a
+              href="/lobby"
+              className="inline-block text-white/50 hover:text-white text-sm font-bold underline transition-colors"
             >
-              🔄 Main Lagi!
-            </button>
-          ) : (
-            <p className="text-green-300 font-bold mb-3">
-              ✓ Votemu tercatat — menunggu pemain lain...
-            </p>
-          )}
-          <a
-            href="/lobby"
-            className="text-white/50 hover:text-white text-sm underline"
-          >
-            ← Kembali ke Lobby
-          </a>
+              ← Kembali ke Lobby
+            </a>
+          </div>
         </div>
       )}
     </div>

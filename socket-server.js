@@ -132,7 +132,7 @@ io.on("connection", (socket) => {
   });
 
   // ROOM
-  socket.on("join_room", ({ roomId, username, pigColor, speed }) => {
+  socket.on("join_room", ({ roomId, username, pigColor, speed, gameMode }) => {
     if (currentRoom === roomId) {
       const r = rooms.get(roomId);
       if (r) {
@@ -141,6 +141,7 @@ io.on("connection", (socket) => {
           started: r.started,
           host: r.host,
           speed: r.speed,
+          gameMode: r.gameMode || "flappy",
         });
         if (r.started) {
           const elapsed = Math.floor((Date.now() - r.startTime) / 1000);
@@ -166,6 +167,7 @@ io.on("connection", (socket) => {
         startTime: 0,
         seed: 0,
         speed: speed || 3,
+        gameMode: gameMode || "flappy",
       });
     }
 
@@ -194,6 +196,7 @@ io.on("connection", (socket) => {
       started: room.started,
       host: room.host,
       speed: room.speed,
+      gameMode: room.gameMode || "flappy",
     });
 
     if (room.started) {

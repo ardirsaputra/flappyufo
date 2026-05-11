@@ -84,32 +84,40 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-linear-to-br from-[#8f6c2f] via-[#C4955A] to-[#8B5E3C]  px-4 py-8">
-      <div className="bg-white/20 backdrop-blur-md rounded-3xl p-8 shadow-2xl w-full max-w-sm">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-gray-950 px-4 py-8 relative overflow-hidden font-sans">
+      {/* Dynamic Background Elements */}
+      <div className="absolute top-[-20%] left-[-10%] w-[70vw] h-[70vw] bg-pink-600/20 blur-[120px] rounded-full pointer-events-none mix-blend-screen" />
+      <div className="absolute bottom-[-20%] right-[-10%] w-[70vw] h-[70vw] bg-purple-600/20 blur-[120px] rounded-full pointer-events-none mix-blend-screen" />
+      <div className="absolute top-[20%] left-[30%] w-[50vw] h-[50vw] bg-blue-600/10 blur-[100px] rounded-full pointer-events-none mix-blend-screen" />
+      
+      <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-8 shadow-2xl w-full max-w-sm relative z-10">
         {/* Header */}
-        <div className="text-center mb-6">
-          <div className="text-6xl mb-2 animate-bounce inline-block">
+        <div className="text-center mb-8">
+          <div className="text-6xl mb-3 animate-bounce inline-block drop-shadow-2xl">
             {selectedChar.emoji}
           </div>
-          <h1 className="text-3xl font-extrabold text-white drop-shadow">
-            Ahhhh BABIIII
+          <h1 className="text-3xl font-black text-transparent bg-clip-text bg-linear-to-r from-pink-400 to-yellow-300 drop-shadow-lg">
+            Flappy Piggies
           </h1>
+          <p className="text-white/60 text-xs mt-1.5 font-bold uppercase tracking-widest">
+            Mulai Petualanganmu
+          </p>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-black/20 rounded-2xl p-1 mb-6">
+        <div className="flex gap-2 bg-white/5 p-1.5 rounded-2xl mb-6 border border-white/10">
           <button
             onClick={() => { setTab("login"); setError(""); }}
-            className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${
-              tab === "login" ? "bg-white text-pink-600 shadow" : "text-white/70 hover:text-white"
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-300 ${
+              tab === "login" ? "bg-pink-500 text-white shadow-lg scale-[1.02]" : "text-white/50 hover:text-white/80"
             }`}
           >
             Masuk
           </button>
           <button
             onClick={() => { setTab("register"); setError(""); }}
-            className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${
-              tab === "register" ? "bg-white text-pink-600 shadow" : "text-white/70 hover:text-white"
+            className={`flex-1 py-2.5 rounded-xl font-bold text-sm transition-all duration-300 ${
+              tab === "register" ? "bg-pink-500 text-white shadow-lg scale-[1.02]" : "text-white/50 hover:text-white/80"
             }`}
           >
             Daftar
@@ -124,7 +132,7 @@ export default function AuthPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             maxLength={20}
-            className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+            className="px-4 py-3.5 rounded-xl text-sm font-bold outline-none bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-pink-500 focus:bg-white/10 transition-all"
           />
 
           {/* Password */}
@@ -134,7 +142,7 @@ export default function AuthPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             maxLength={64}
-            className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+            className="px-4 py-3.5 rounded-xl text-sm font-bold outline-none bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-pink-500 focus:bg-white/10 transition-all"
           />
 
           {/* Confirm password (register only) */}
@@ -145,16 +153,16 @@ export default function AuthPage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               maxLength={64}
-              className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+              className="px-4 py-3.5 rounded-xl text-sm font-bold outline-none bg-white/5 border border-white/10 text-white placeholder-white/30 focus:border-pink-500 focus:bg-white/10 transition-all"
             />
           )}
 
           {/* Character picker (register only) */}
           {tab === "register" && (
-            <div>
-              <p className="text-white font-semibold mb-2 text-sm">
+            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+              <p className="text-white/80 font-bold mb-3 text-[11px] uppercase tracking-wider">
                 🎮 Pilih Karakter:{" "}
-                <span className="text-yellow-200">{selectedChar.emoji} {selectedChar.label}</span>
+                <span className="text-pink-300 ml-1">{selectedChar.emoji} {selectedChar.label}</span>
               </p>
               <div className="grid grid-cols-4 gap-2">
                 {CHARACTERS.map((c) => (
@@ -162,14 +170,14 @@ export default function AuthPage() {
                     key={c.id}
                     type="button"
                     onClick={() => setCharacter(c.id)}
-                    className={`flex flex-col items-center justify-center py-2 rounded-xl text-2xl transition active:scale-90 ${
+                    className={`flex flex-col items-center justify-center py-2.5 rounded-xl text-2xl transition-all duration-300 active:scale-90 ${
                       character === c.id
-                        ? "bg-white/40 ring-2 ring-white"
-                        : "bg-white/10 hover:bg-white/20"
+                        ? "bg-white/20 ring-1 ring-white/50 shadow-[0_0_15px_rgba(255,255,255,0.1)]"
+                        : "bg-white/5 hover:bg-white/10"
                     }`}
                   >
                     <span>{c.emoji}</span>
-                    <span className="text-white text-xs font-bold mt-0.5">{c.label}</span>
+                    <span className="text-white/90 text-[10px] font-bold mt-1.5 uppercase">{c.label}</span>
                   </button>
                 ))}
               </div>
@@ -178,23 +186,23 @@ export default function AuthPage() {
 
           {/* Color picker (register only) */}
           {tab === "register" && (
-            <div>
-              <p className="text-white font-semibold mb-2 text-sm">
-                🎨 Warna:{" "}
-                <span className="text-yellow-200">{selectedColor.label}</span>
+            <div className="bg-white/5 border border-white/10 p-4 rounded-2xl">
+              <p className="text-white/80 font-bold mb-3 text-[11px] uppercase tracking-wider">
+                🎨 Warna Kulit:{" "}
+                <span className="text-pink-300 ml-1">{selectedColor.label}</span>
               </p>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-5 gap-3">
                 {PIG_COLOR_OPTIONS.map((c) => (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => setPigColor(c.id)}
-                    className="h-8 rounded-xl transition-transform active:scale-90"
+                    className="h-8 rounded-full transition-all duration-300 active:scale-90"
                     style={{
                       backgroundColor: c.hex,
-                      border: `3px solid ${pigColor === c.id ? c.accent : "transparent"}`,
-                      outline: pigColor === c.id ? "2px solid white" : "none",
-                      outlineOffset: "1px",
+                      border: `2px solid ${pigColor === c.id ? "#fff" : "transparent"}`,
+                      boxShadow: pigColor === c.id ? `0 0 12px ${c.hex}` : "none",
+                      transform: pigColor === c.id ? "scale(1.15)" : "scale(1)",
                     }}
                     title={c.label}
                   />
@@ -212,9 +220,9 @@ export default function AuthPage() {
           <button
             type="submit"
             disabled={loading}
-            className="py-3 bg-pink-500 hover:bg-pink-400 active:scale-95 text-white text-lg font-bold rounded-xl shadow-lg transition disabled:opacity-60"
+            className="py-3.5 mt-2 bg-linear-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 active:scale-95 text-white text-sm font-black uppercase tracking-widest rounded-xl shadow-[0_0_20px_rgba(236,72,153,0.3)] transition-all disabled:opacity-50"
           >
-            {loading ? "Loading..." : tab === "login" ? "Masuk 🚀" : "Daftar & Main! 🎮"}
+            {loading ? "Loading..." : tab === "login" ? "Masuk ke Game 🚀" : "Daftar & Main! 🎮"}
           </button>
         </form>
 
@@ -227,22 +235,22 @@ export default function AuthPage() {
 
       {/* Mini leaderboard */}
       {leaderboard.length > 0 && (
-        <div className="bg-white/20 backdrop-blur-md rounded-2xl p-5 shadow-xl w-full max-w-sm">
-          <h2 className="text-white font-bold text-lg mb-3 text-center">🏆 Top Pemain</h2>
-          <div className="flex flex-col gap-1">
+        <div className="bg-black/40 backdrop-blur-2xl border border-white/10 rounded-[2rem] p-6 shadow-2xl w-full max-w-sm relative z-10">
+          <h2 className="text-white font-black text-sm mb-4 text-center tracking-widest uppercase">🏆 Top Pemain</h2>
+          <div className="flex flex-col gap-2">
             {leaderboard.map((entry, i) => (
-              <div key={i} className="flex items-center justify-between bg-white/10 rounded-xl px-3 py-1.5">
-                <span className="text-white font-semibold">
-                  {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}{" "}
+              <div key={i} className="flex items-center justify-between bg-white/5 hover:bg-white/10 transition-colors rounded-xl px-4 py-2.5 border border-white/5">
+                <span className="text-white font-bold text-sm">
+                  <span className="mr-3 text-lg">{i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `\u200A\u200A\u200A\u200A\u200A${i + 1}`}</span>
                   {entry.username}
                 </span>
-                <span className="text-yellow-200 font-bold">{entry.best_score}</span>
+                <span className="text-yellow-300 font-black">{entry.best_score}</span>
               </div>
             ))}
           </div>
-          <div className="mt-3 text-center">
-            <a href="/leaderboard" className="text-white/60 hover:text-white text-xs underline">
-              Lihat semua →
+          <div className="mt-5 text-center">
+            <a href="/leaderboard" className="text-white/50 hover:text-white text-[10px] font-bold uppercase tracking-widest transition-colors">
+              Lihat Papan Peringkat Penuh →
             </a>
           </div>
         </div>

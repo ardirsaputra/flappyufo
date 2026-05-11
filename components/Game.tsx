@@ -127,6 +127,7 @@ export default function Game({
     gameSeed: 0,
     initialSpeed: 3,
     lastTickMs: 0,
+    accumulator: 0,
     rng: null as (() => number) | null,
     frame: 0,
     flapAngle: 0,
@@ -431,11 +432,12 @@ export default function Game({
 
   // Dino-mode item spawners
   function spawnDinoCoins(cactusX: number) {
-    const count = 2 + Math.floor(Math.random() * 3);
+    const g = gameRef.current;
+    const count = 2 + Math.floor((g.rng?.() ?? Math.random()) * 3);
     const baseX = cactusX - 260;
     for (let i = 0; i < count; i++) {
-      const coinBirdY = 30 + Math.floor(Math.random() * 130);
-      const isBig = Math.random() < 0.2;
+      const coinBirdY = 30 + Math.floor((g.rng?.() ?? Math.random()) * 130);
+      const isBig = (g.rng?.() ?? Math.random()) < 0.2;
       gameRef.current.coins.push({
         x: baseX + i * 55,
         y: CONFIG.height - coinBirdY - 14,
@@ -716,12 +718,15 @@ export default function Game({
     });
 
     // Opponents: ghost pigs at their actual Y positions (both flappy and dino modes)
+    // Make them smaller and drawn behind
     g.opponents.forEach((op) => {
-      const opW = g.dinoMode ? 30 : op.bigMode ? 52 : 40;
-      const opH = g.dinoMode ? 30 : op.bigMode ? 44 : 34;
-      const opX = g.dinoMode ? 78 : 96;
+      const baseW = g.dinoMode ? 30 : op.bigMode ? 52 : 40;
+      const baseH = g.dinoMode ? 30 : op.bigMode ? 44 : 34;
+      const opW = baseW * 0.7; // scaled down to 70%
+      const opH = baseH * 0.7;
+      const opX = g.dinoMode ? 85 : 85; // moved slightly left behind main player
       const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
-      ctx.globalAlpha = op.alive ? 0.5 : 0.2;
+      ctx.globalAlpha = op.alive ? 0.6 : 0.2;
       drawCharacter(
         ctx,
         opX,
@@ -735,9 +740,9 @@ export default function Game({
         op.character || "pig",
       );
       // Opponent username label
-      ctx.globalAlpha = op.alive ? 0.7 : 0.3;
+      ctx.globalAlpha = op.alive ? 0.8 : 0.4;
       ctx.fillStyle = op.alive ? "#fff" : "#ff9999";
-      ctx.font = "bold 10px Arial";
+      ctx.font = "bold 9px Arial";
       ctx.textAlign = "center";
       ctx.fillText(
         op.alive ? op.username : `💀 ${op.username}`,
@@ -773,42 +778,69 @@ export default function Game({
       ].sort((a, b) => b.score - a.score);
 
       const maxRows = Math.min(allPlayers.length, 8);
-      const sbW = 155,
-        sbH = 20 + maxRows * 20;
-      const sbX = W - sbW - 6,
-        sbY = 6;
-      ctx.fillStyle = "rgba(0,0,0,0.55)";
+      const sbW = 180,
+        sbH = 34 + maxRows * 24;
+      const sbX = W - sbW - 12,
+        sbY = 12;
+      
+      // Modern glassmorphism scoreboard background
+      ctx.save();
+      ctx.fillStyle = "rgba(15, 20, 30, 0.4)";
       ctx.beginPath();
-      ctx.roundRect(sbX, sbY, sbW, sbH, 8);
+      ctx.roundRect(sbX, sbY, sbW, sbH, 12);
       ctx.fill();
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+      ctx.stroke();
 
-      ctx.fillStyle = "#ffd700";
-      ctx.font = "bold 10px Arial";
+      // Title
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 12px Arial";
       ctx.textAlign = "center";
-      ctx.fillText("🏆 Scoreboard", sbX + sbW / 2, sbY + 13);
+      ctx.shadowColor = "rgba(0,0,0,0.5)";
+      ctx.shadowBlur = 4;
+      ctx.fillText("🏆 LEADERBOARD", sbX + sbW / 2, sbY + 20);
+      ctx.shadowBlur = 0;
+      
+      // Divider
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.fillRect(sbX + 10, sbY + 28, sbW - 20, 1);
 
       allPlayers.slice(0, 8).forEach((p, i) => {
-        const py = sbY + 20 + i * 20;
+        const py = sbY + 34 + i * 24;
+        
+        // Highlight background for self
+        if (p.isMe) {
+          ctx.fillStyle = "rgba(255, 255, 255, 0.15)";
+          ctx.beginPath();
+          ctx.roundRect(sbX + 4, py - 4, sbW - 8, 20, 6);
+          ctx.fill();
+        }
+
         const colorHex = PIG_COLOR_HEX[p.color] || "#ffc8d8";
         ctx.fillStyle = colorHex;
         ctx.beginPath();
-        ctx.arc(sbX + 12, py + 7, 5, 0, Math.PI * 2);
+        ctx.arc(sbX + 16, py + 6, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(255,255,255,0.4)";
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = "rgba(255,255,255,0.6)";
+        ctx.lineWidth = 1.5;
         ctx.stroke();
-        ctx.fillStyle = p.isMe ? "#ffd700" : p.alive ? "#ffffff" : "#ff9999";
-        ctx.font = `${p.isMe ? "bold " : ""}10px Arial`;
+        
+        ctx.fillStyle = p.isMe ? "#ffd700" : p.alive ? "#ffffff" : "rgba(255, 150, 150, 0.8)";
+        ctx.font = `${p.isMe ? "bold " : ""}11px Arial`;
         ctx.textAlign = "left";
         ctx.fillText(
-          `${i + 1}. ${p.username.substring(0, 10)}`,
-          sbX + 20,
+          `${i + 1}. ${p.username.substring(0, 12)}${p.isMe ? " (You)" : ""}`,
+          sbX + 28,
           py + 10,
         );
-        ctx.fillStyle = p.alive ? "#aaffaa" : "#ff9999";
+        
+        ctx.fillStyle = p.alive ? "#aaffaa" : "rgba(255, 150, 150, 0.8)";
         ctx.textAlign = "right";
-        ctx.fillText(String(p.score), sbX + sbW - 6, py + 10);
+        ctx.font = "bold 12px Arial";
+        ctx.fillText(String(p.score), sbX + sbW - 12, py + 10);
       });
+      ctx.restore();
     }
 
     // Player pig
@@ -951,166 +983,88 @@ export default function Game({
     frame: number,
     colorId: string = "pink",
   ) {
-    if (w < 40) {
-      // Baby pig
-      const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["pink"];
-      const [bodyLight, bodyDark] = palette.body;
-      const strokeColor = palette.stroke;
-
-      ctx.save();
-      if (powered) {
-        ctx.shadowColor = "#ffd700";
-        ctx.shadowBlur = 20;
-      }
-      if (bigMode) {
-        ctx.shadowColor = "#ff69b4";
-        ctx.shadowBlur = 22;
-      }
-
-      // Body - more round
-      const bodyGrad = ctx.createRadialGradient(
-        x + w * 0.4,
-        y + h * 0.4,
-        2,
-        x + w / 2,
-        y + h / 2,
-        w * 0.7,
-      );
-      bodyGrad.addColorStop(0, bodyLight);
-      bodyGrad.addColorStop(1, bodyDark);
-      ctx.fillStyle = bodyGrad;
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-
-      // Small ears
-      ctx.fillStyle = strokeColor;
-      ctx.beginPath();
-      ctx.ellipse(x + w * 0.25, y + 3, 4, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.ellipse(x + w * 0.55, y + 3, 4, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Small snout
-      ctx.fillStyle = strokeColor;
-      ctx.beginPath();
-      ctx.ellipse(x + w - 5, y + h * 0.55, 6, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(130,40,60,0.3)";
-      ctx.beginPath();
-      ctx.arc(x + w - 7, y + h * 0.58, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(x + w - 3, y + h * 0.58, 1.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Eye
-      ctx.fillStyle = "#2d2d2d";
-      ctx.beginPath();
-      ctx.arc(x + w * 0.62, y + h * 0.38, 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "white";
-      ctx.beginPath();
-      ctx.arc(x + w * 0.64, y + h * 0.36, 1, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Tail
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(x + 2, y + h * 0.6, 3, Math.PI * 0.5, Math.PI * 1.5);
-      ctx.stroke();
-
-      ctx.restore();
-      return;
-    }
-
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["pink"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
 
     ctx.save();
-    if (powered) {
-      ctx.shadowColor = "#ffd700";
-      ctx.shadowBlur = 20;
-    }
-    if (bigMode) {
-      ctx.shadowColor = "#ff69b4";
-      ctx.shadowBlur = 15;
-    }
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
 
-    // Body
-    const bodyGrad = ctx.createRadialGradient(
-      x + w * 0.4,
-      y + h * 0.4,
-      2,
-      x + w / 2,
-      y + h / 2,
-      w * 0.7,
-    );
+    const bw = w * 0.9;
+    const bh = h * 0.9;
+    const bx = x + (w - bw) / 2;
+    const by = y + (h - bh) / 2;
+
+    const bodyGrad = ctx.createRadialGradient(bx + bw * 0.3, by + bh * 0.3, 2, bx + bw / 2, by + bh / 2, bw * 0.8);
     bodyGrad.addColorStop(0, bodyLight);
     bodyGrad.addColorStop(1, bodyDark);
-    ctx.fillStyle = bodyGrad;
+    
+    ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Wing
-    ctx.fillStyle = bodyLight;
-    ctx.beginPath();
-    ctx.ellipse(x + 4, y + h / 2 + 5, 10, 7, -0.4, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Ear
+    
+    // Ears
     ctx.fillStyle = strokeColor;
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.25, y + 5, 7, 7, 0, 0, Math.PI * 2);
+    ctx.moveTo(bx + bw * 0.2, by + bh * 0.2);
+    ctx.quadraticCurveTo(bx + bw * 0.3, by - bh * 0.15, bx + bw * 0.45, by + bh * 0.1);
     ctx.fill();
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.55, y + 5, 7, 7, 0, 0, Math.PI * 2);
+    ctx.moveTo(bx + bw * 0.55, by + bh * 0.1);
+    ctx.quadraticCurveTo(bx + bw * 0.7, by - bh * 0.15, bx + bw * 0.8, by + bh * 0.2);
     ctx.fill();
+
+    // Body Squircle
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, bh * 0.4);
+    ctx.fill();
+    ctx.stroke();
 
     // Snout
     ctx.fillStyle = strokeColor;
     ctx.beginPath();
-    ctx.ellipse(x + w - 8, y + h * 0.55, 11, 8, 0, 0, Math.PI * 2);
+    ctx.roundRect(bx + bw * 0.75, by + bh * 0.45, bw * 0.3, bh * 0.3, 5);
     ctx.fill();
     ctx.fillStyle = "rgba(130,40,60,0.3)";
-    ctx.beginPath();
-    ctx.arc(x + w - 13, y + h * 0.58, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + w - 4, y + h * 0.58, 3, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.85, by + bh * 0.6, bw * 0.04, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.95, by + bh * 0.6, bw * 0.04, 0, Math.PI * 2); ctx.fill();
 
-    // Eye
-    ctx.fillStyle = "#2d2d2d";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.62, y + h * 0.38, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.63, y + h * 0.36, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    // Big Kawaii Eye
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.65, by + bh * 0.35, bw * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.68, by + bh * 0.31, bw * 0.04, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.61, by + bh * 0.38, bw * 0.02, 0, Math.PI * 2); ctx.fill();
 
-    // Flap animation
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.5, by + bh * 0.55, bw * 0.1, bh * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Curly Tail
+    ctx.strokeStyle = strokeColor;
+    ctx.beginPath();
+    ctx.arc(bx - bw * 0.05, by + bh * 0.7, bw * 0.08, Math.PI * 0.5, Math.PI * 2);
+    ctx.stroke();
+
+    // Wing Flap
+    const flapY = Math.sin(frame * 0.4) * (bh * 0.3);
+    ctx.fillStyle = bodyLight;
+    ctx.strokeStyle = strokeColor;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw * 0.4, by + bh * 0.5);
+    ctx.quadraticCurveTo(bx - bw * 0.1, by + bh * 0.5 + flapY, bx + bw * 0.1, by + bh * 0.75 + flapY * 0.5);
+    ctx.quadraticCurveTo(bx + bw * 0.3, by + bh * 0.7, bx + bw * 0.4, by + bh * 0.5);
+    ctx.fill();
+    ctx.stroke();
+
     if (powered) {
-      const flapY = Math.sin(frame * 0.3) * 4;
       ctx.strokeStyle = "#ffd700";
-      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(x + w * 0.3, y + h * 0.5);
-      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.moveTo(bx, by + bh * 0.5);
+      ctx.lineTo(bx - bw * 0.3, by + bh * 0.4 + flapY);
       ctx.stroke();
     }
-
     ctx.restore();
   }
 
@@ -1129,99 +1083,54 @@ export default function Game({
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) {
-      ctx.shadowColor = "#ffd700";
-      ctx.shadowBlur = 20;
-    }
-    if (bigMode) {
-      ctx.shadowColor = "#ff69b4";
-      ctx.shadowBlur = 15;
-    }
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
 
-    const bodyGrad = ctx.createRadialGradient(
-      x + w * 0.4,
-      y + h * 0.4,
-      2,
-      x + w / 2,
-      y + h / 2,
-      w * 0.7,
-    );
+    const bw = w * 0.9; const bh = h * 0.9;
+    const bx = x + (w - bw) / 2; const by = y + (h - bh) / 2;
+
+    const bodyGrad = ctx.createRadialGradient(bx + bw * 0.3, by + bh * 0.3, 2, bx + bw / 2, by + bh / 2, bw * 0.8);
     bodyGrad.addColorStop(0, bodyLight);
     bodyGrad.addColorStop(1, bodyDark);
-    ctx.fillStyle = bodyGrad;
-    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = w < 40 ? 1.5 : 2;
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    ctx.strokeStyle = strokeColor;
 
-    const earR = w < 40 ? 5 : 8;
-    // Outer ears
+    // Bear Ears
     ctx.fillStyle = strokeColor;
-    ctx.beginPath();
-    ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2);
-    ctx.fill();
-    // Inner ears
+    ctx.beginPath(); ctx.arc(bx + bw * 0.25, by + bh * 0.1, bw * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.75, by + bh * 0.1, bw * 0.15, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = bodyLight;
-    ctx.beginPath();
-    ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.25, by + bh * 0.1, bw * 0.08, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.75, by + bh * 0.1, bw * 0.08, 0, Math.PI * 2); ctx.fill();
+
+    // Body
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, bh * 0.4); ctx.fill(); ctx.stroke();
 
     // Snout
-    ctx.fillStyle = bodyLight;
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.73,
-      y + h * 0.58,
-      w < 40 ? 5 : 9,
-      w < 40 ? 4 : 7,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#333";
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.75,
-      y + h * 0.52,
-      w < 40 ? 1.5 : 3,
-      w < 40 ? 1 : 2,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
+    ctx.fillStyle = "#fff0e0";
+    ctx.beginPath(); ctx.roundRect(bx + bw * 0.65, by + bh * 0.5, bw * 0.35, bh * 0.3, 6); ctx.fill(); ctx.stroke();
+    // Nose
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.85, by + bh * 0.55, bw * 0.08, bh * 0.05, 0, 0, Math.PI * 2); ctx.fill();
 
-    // Eye
-    ctx.fillStyle = "#2d2d2d";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    // Kawaii Eye
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.6, by + bh * 0.35, bw * 0.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.63, by + bh * 0.32, bw * 0.03, 0, Math.PI * 2); ctx.fill();
 
-    if (powered) {
-      const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.3, y + h * 0.5);
-      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
-      ctx.stroke();
-    }
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.45, by + bh * 0.55, bw * 0.1, bh * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Arm/Wing
+    const flapY = Math.sin(frame * 0.4) * (bh * 0.15);
+    ctx.fillStyle = bodyDark;
+    ctx.beginPath();
+    ctx.roundRect(bx + bw * 0.2, by + bh * 0.5 + flapY, bw * 0.2, bh * 0.4, 6);
+    ctx.fill(); ctx.stroke();
+
     ctx.restore();
   }
 
@@ -1236,111 +1145,59 @@ export default function Game({
     frame: number,
     colorId: string = "white",
   ) {
-    void colorId; // panda uses fixed white body; color ignored
+    void colorId;
     ctx.save();
-    if (powered) {
-      ctx.shadowColor = "#ffd700";
-      ctx.shadowBlur = 20;
-    }
-    if (bigMode) {
-      ctx.shadowColor = "#ff69b4";
-      ctx.shadowBlur = 15;
-    }
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
 
-    // White body
-    const bodyGrad = ctx.createRadialGradient(
-      x + w * 0.4,
-      y + h * 0.4,
-      2,
-      x + w / 2,
-      y + h / 2,
-      w * 0.7,
-    );
-    bodyGrad.addColorStop(0, "#f8f8f8");
-    bodyGrad.addColorStop(1, "#d8d8d8");
-    ctx.fillStyle = bodyGrad;
-    ctx.strokeStyle = "#999";
+    const bw = w * 0.9; const bh = h * 0.9;
+    const bx = x + (w - bw) / 2; const by = y + (h - bh) / 2;
+
+    const bodyGrad = ctx.createRadialGradient(bx + bw * 0.3, by + bh * 0.3, 2, bx + bw / 2, by + bh / 2, bw * 0.8);
+    bodyGrad.addColorStop(0, "#fff");
+    bodyGrad.addColorStop(1, "#e0e0e0");
     ctx.lineWidth = w < 40 ? 1.5 : 2;
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    ctx.strokeStyle = "#888";
 
-    // Black round ears
+    // Black Ears
     ctx.fillStyle = "#222";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.25, by + bh * 0.1, bw * 0.15, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.75, by + bh * 0.1, bw * 0.15, 0, Math.PI * 2); ctx.fill();
 
-    // Black eye patch
-    ctx.fillStyle = "#111";
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.61,
-      y + h * 0.37,
-      w < 40 ? 4 : 7,
-      w < 40 ? 3.5 : 6,
-      0.3,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
+    // Body
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, bh * 0.4); ctx.fill(); ctx.stroke();
 
-    // White + black eye
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2);
-    ctx.fill();
+    // Black Eye Patch
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.65, by + bh * 0.38, bw * 0.15, bh * 0.12, -0.2, 0, Math.PI * 2); ctx.fill();
+
+    // Kawaii Eye
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.67, by + bh * 0.35, bw * 0.06, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = "#111";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.69, by + bh * 0.35, bw * 0.03, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.7, by + bh * 0.33, bw * 0.01, 0, Math.PI * 2); ctx.fill();
 
     // Snout
-    ctx.fillStyle = "#f0f0f0";
-    ctx.strokeStyle = "#bbb";
-    ctx.lineWidth = 1;
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.roundRect(bx + bw * 0.65, by + bh * 0.5, bw * 0.35, bh * 0.3, 6); ctx.fill(); ctx.stroke();
+    // Nose
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.85, by + bh * 0.55, bw * 0.06, bh * 0.04, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.45, by + bh * 0.55, bw * 0.1, bh * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Black Arm
+    const flapY = Math.sin(frame * 0.4) * (bh * 0.15);
+    ctx.fillStyle = "#222";
     ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.73,
-      y + h * 0.58,
-      w < 40 ? 5 : 9,
-      w < 40 ? 4 : 7,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = "#555";
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.73,
-      y + h * 0.53,
-      w < 40 ? 1.5 : 2.5,
-      w < 40 ? 1 : 1.5,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.roundRect(bx + bw * 0.2, by + bh * 0.5 + flapY, bw * 0.2, bh * 0.4, 6);
     ctx.fill();
 
-    if (powered) {
-      const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.3, y + h * 0.5);
-      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -1359,112 +1216,62 @@ export default function Game({
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) {
-      ctx.shadowColor = "#ffd700";
-      ctx.shadowBlur = 20;
-    }
-    if (bigMode) {
-      ctx.shadowColor = "#ff69b4";
-      ctx.shadowBlur = 15;
-    }
+    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
+    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
 
-    const bodyGrad = ctx.createRadialGradient(
-      x + w * 0.4,
-      y + h * 0.4,
-      2,
-      x + w / 2,
-      y + h / 2,
-      w * 0.7,
-    );
+    const bw = w * 0.9; const bh = h * 0.9;
+    const bx = x + (w - bw) / 2; const by = y + (h - bh) / 2;
+
+    const bodyGrad = ctx.createRadialGradient(bx + bw * 0.3, by + bh * 0.3, 2, bx + bw / 2, by + bh / 2, bw * 0.8);
     bodyGrad.addColorStop(0, bodyLight);
     bodyGrad.addColorStop(1, bodyDark);
-    ctx.fillStyle = bodyGrad;
-    ctx.strokeStyle = strokeColor;
     ctx.lineWidth = w < 40 ? 1.5 : 2;
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    ctx.strokeStyle = strokeColor;
 
-    // Dorsal spines
-    const spineCount = w < 40 ? 2 : 3;
+    // Dorsal Spikes
     ctx.fillStyle = strokeColor;
-    for (let i = 0; i < spineCount; i++) {
-      const sx = x + w * (0.2 + i * (0.55 / spineCount));
-      const sh = w < 40 ? 5 - i : 8 - i * 2;
+    for (let i = 0; i < 3; i++) {
+      const sx = bx + bw * (0.15 + i * 0.2);
       ctx.beginPath();
-      ctx.moveTo(sx - 2, y + h * 0.12);
-      ctx.lineTo(sx, y + h * 0.12 - sh);
-      ctx.lineTo(sx + 2, y + h * 0.12);
-      ctx.closePath();
+      ctx.moveTo(sx - bw * 0.1, by + bh * 0.15);
+      ctx.lineTo(sx + bw * 0.05, by - bh * 0.1);
+      ctx.lineTo(sx + bw * 0.2, by + bh * 0.15);
       ctx.fill();
     }
 
-    // Yellow slit eye
-    ctx.fillStyle = "#ffd700";
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.65,
-      y + h * 0.38,
-      w < 40 ? 3.5 : 6,
-      w < 40 ? 3 : 5,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
+    // Body
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, bh * 0.4); ctx.fill(); ctx.stroke();
+
+    // Eye
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.65, by + bh * 0.35, bw * 0.12, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(bx + bw * 0.68, by + bh * 0.31, bw * 0.04, 0, Math.PI * 2); ctx.fill();
+
+    // Blush
+    ctx.fillStyle = "rgba(255, 100, 150, 0.4)";
+    ctx.beginPath(); ctx.ellipse(bx + bw * 0.5, by + bh * 0.55, bw * 0.1, bh * 0.05, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Snout Line
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw * 0.9, by + bh * 0.55);
+    ctx.quadraticCurveTo(bx + bw * 0.95, by + bh * 0.6, bx + bw * 0.8, by + bh * 0.65);
     ctx.stroke();
-    ctx.fillStyle = "#111";
-    ctx.beginPath();
-    ctx.ellipse(
-      x + w * 0.65,
-      y + h * 0.38,
-      w < 40 ? 1 : 2,
-      w < 40 ? 2.5 : 4,
-      0,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
-    ctx.fillStyle = "white";
-    ctx.beginPath();
-    ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2);
-    ctx.fill();
 
     // Nostril
     ctx.fillStyle = strokeColor;
-    ctx.beginPath();
-    ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bx + bw * 0.85, by + bh * 0.45, bw * 0.03, 0, Math.PI * 2); ctx.fill();
 
-    // Tail
+    // Tiny T-Rex Arm
+    const flapY = Math.sin(frame * 0.4) * (bh * 0.1);
+    ctx.fillStyle = bodyLight;
     ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = w < 40 ? 2.5 : 4;
     ctx.beginPath();
-    ctx.moveTo(x + 5, y + h * 0.5);
-    ctx.quadraticCurveTo(x - 4, y + h * 0.5, x - 8, y + h * 0.68);
-    ctx.stroke();
+    ctx.roundRect(bx + bw * 0.6, by + bh * 0.65 + flapY, bw * 0.2, bh * 0.1, 3);
+    ctx.fill(); ctx.stroke();
 
-    if (w >= 40) {
-      // Small arm
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.35, y + h * 0.55);
-      ctx.lineTo(x + w * 0.2, y + h * 0.68);
-      ctx.stroke();
-    }
-
-    if (powered) {
-      const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(x + w * 0.3, y + h * 0.5);
-      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
-      ctx.stroke();
-    }
     ctx.restore();
   }
 
@@ -1519,11 +1326,11 @@ export default function Game({
         // Spawn next cactus when last one scrolled past the gap threshold
         const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
         if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
-          const height = 44 + Math.floor(Math.random() * 40);
+          const height = 44 + Math.floor((g.rng?.() ?? Math.random()) * 40);
           g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
-          g.dinoNextGap = 300 + Math.random() * 270;
+          g.dinoNextGap = 300 + (g.rng?.() ?? Math.random()) * 270;
           spawnDinoCoins(CONFIG.width + 60);
-          if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
+          if ((g.rng?.() ?? Math.random()) < 0.3) spawnDinoMushroom(CONFIG.width + 60);
         }
 
         // Collision check + cactus-passed scoring
@@ -1611,7 +1418,6 @@ export default function Game({
           });
         }
 
-        draw();
         return;
       }
 
@@ -1758,8 +1564,6 @@ export default function Game({
           bigMode: g.bigMode,
         });
       }
-
-      draw();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     },
     [draw, solo],
@@ -1823,11 +1627,17 @@ export default function Game({
       // Also advance world state (pipes/cacti/items) so they keep scrolling
       if (g.animLoop) clearInterval(g.animLoop);
       let lastAnimMs = Date.now();
+      g.accumulator = 0;
       g.animLoop = setInterval(() => {
         const now = Date.now();
-        const dtf = Math.min(now - lastAnimMs, 80) / 20;
+        let dt = now - lastAnimMs;
         lastAnimMs = now;
+        if (dt > 2000) dt = 2000;
         const sg = gameRef.current;
+        sg.accumulator += dt;
+        let didTick = false;
+        while (sg.accumulator >= 20) {
+          const dtf = 1;
         // Fall animation for dead player's pig
         if (!sg.dinoMode) {
           sg.birdVelocity -= 0.5;
@@ -1840,9 +1650,12 @@ export default function Game({
           const lastC =
             sg.cacti.length > 0 ? sg.cacti[sg.cacti.length - 1] : null;
           if (!lastC || lastC.x < CONFIG.width - sg.dinoNextGap) {
-            const height = 44 + Math.floor(Math.random() * 40);
+            const height = 44 + Math.floor((sg.rng?.() ?? Math.random()) * 40);
             sg.cacti.push({ x: CONFIG.width + 60, height, passed: false });
-            sg.dinoNextGap = 300 + Math.random() * 270;
+            sg.dinoNextGap = 300 + (sg.rng?.() ?? Math.random()) * 270;
+            // Also keep spawning coins/items so the timeline continues normally for spectator
+            spawnDinoCoins(CONFIG.width + 60);
+            if ((sg.rng?.() ?? Math.random()) < 0.3) spawnDinoMushroom(CONFIG.width + 60);
           }
         } else {
           for (const pipe of sg.pipes) pipe.x -= sg.pipeSpeed * dtf;
@@ -1855,9 +1668,12 @@ export default function Game({
         }
         for (const coin of sg.coins) coin.x -= sg.pipeSpeed * dtf;
         sg.coins = sg.coins.filter((c) => c.x > -40);
-        for (const m of sg.mushrooms) m.x -= sg.pipeSpeed * dtf;
-        sg.mushrooms = sg.mushrooms.filter((m) => m.x > -60);
-        draw();
+          for (const m of sg.mushrooms) m.x -= sg.pipeSpeed * dtf;
+          sg.mushrooms = sg.mushrooms.filter((m) => m.x > -60);
+          sg.accumulator -= 20;
+          didTick = true;
+        }
+        if (didTick) draw();
       }, 20);
       setGamePhase("dead");
     }
@@ -1916,12 +1732,21 @@ export default function Game({
     if (!g.dinoMode) initPipes(); // dino mode spawns cacti in tick
     g.started = true;
     g.lastTickMs = Date.now();
+    g.accumulator = 0;
     if (g.gameLoop) clearInterval(g.gameLoop);
     g.gameLoop = setInterval(() => {
       const now = Date.now();
-      const dt = Math.min(now - g.lastTickMs, 80);
+      let dt = now - g.lastTickMs;
       g.lastTickMs = now;
-      tick(dt / 20);
+      if (dt > 2000) dt = 2000; // clamp max catch-up
+      g.accumulator += dt;
+      let didTick = false;
+      while (g.accumulator >= 20) {
+        tick(1);
+        g.accumulator -= 20;
+        didTick = true;
+      }
+      if (didTick && !g.over && g.started) draw();
     }, 20);
     setGamePhase("playing");
   }
@@ -2008,6 +1833,7 @@ export default function Game({
           character,
           speed: initialSpeed || CONFIG.baseSpeed,
           password: password || "",
+          gameMode: dinoMode ? "dino" : "flappy",
         });
       }
 
