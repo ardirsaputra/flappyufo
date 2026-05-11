@@ -575,6 +575,13 @@ export default function LobbyPage() {
             </div>
             <div className="flex items-center gap-3 shrink-0 text-xs">
               <a
+                href="/discussion"
+                className="text-white/60 hover:text-white transition"
+                title="Diskusi"
+              >
+                💬
+              </a>
+              <a
                 href="/leaderboard"
                 className="text-white/60 hover:text-white transition"
               >
@@ -1316,6 +1323,9 @@ export default function LobbyPage() {
           >
             <span className="text-sm font-bold text-white flex-1">
               💬 Chat Lobby
+              <span className="text-white/30 text-[10px] ml-1.5 font-normal">
+                7 hari
+              </span>
             </span>
             {unreadChat > 0 && !showChat && (
               <span className="bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">

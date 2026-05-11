@@ -42,6 +42,36 @@ export async function initDB() {
       blocked_by VARCHAR(32),
       created_at TIMESTAMP DEFAULT NOW()
     );
+
+    CREATE TABLE IF NOT EXISTS discussions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      username VARCHAR(32) NOT NULL,
+      title VARCHAR(200) NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS discussion_comments (
+      id SERIAL PRIMARY KEY,
+      discussion_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      username VARCHAR(32) NOT NULL,
+      content TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+
+    CREATE TABLE IF NOT EXISTS lobby_chat_messages (
+      id SERIAL PRIMARY KEY,
+      msg_id VARCHAR(64) UNIQUE NOT NULL,
+      username VARCHAR(32) NOT NULL,
+      pig_color VARCHAR(16) NOT NULL DEFAULT 'pink',
+      text TEXT NOT NULL,
+      ts BIGINT NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
   // Safe migrations — columns added only if missing
   await pool.query(`
@@ -52,4 +82,8 @@ export async function initDB() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_device_id VARCHAR(64);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64);
   `);
+  // Purge lobby chat older than 7 days
+  await pool.query(`DELETE FROM lobby_chat_messages WHERE ts < $1`, [
+    Date.now() - 7 * 24 * 60 * 60 * 1000,
+  ]);
 }

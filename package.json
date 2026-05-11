@@ -10,8 +10,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@colyseus/core": "^0.15.57",
+    "@colyseus/schema": "^2.0.37",
+    "@colyseus/ws-transport": "^0.15.3",
     "@types/pg": "^8.20.0",
     "@types/uuid": "^10.0.0",
+    "colyseus.js": "^0.15.28",
     "next": "16.2.5",
     "pg": "^8.20.0",
     "react": "19.2.4",

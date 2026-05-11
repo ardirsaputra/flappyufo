@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
-import { io, Socket } from "socket.io-client";
+import { Client as ColyseusClient, Room as ColyseusRoom } from "colyseus.js";
 
 interface PlayerState {
   id: string;
@@ -111,7 +111,14 @@ export default function Game({
       passed: boolean;
       crushed: boolean;
     }[],
-    coins: [] as { x: number; y: number; collected: boolean; animT: number; value: number; radius: number }[],
+    coins: [] as {
+      x: number;
+      y: number;
+      collected: boolean;
+      animT: number;
+      value: number;
+      radius: number;
+    }[],
     mushrooms: [] as { x: number; y: number; collected: boolean }[],
     poisons: [] as { x: number; y: number; r: number; contactTime: number }[],
     pipeSpeed: CONFIG.baseSpeed,
@@ -152,7 +159,7 @@ export default function Game({
       size: number;
     }[],
   });
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<ColyseusRoom | null>(null);
   const [socketId, setSocketId] = useState("");
   const [uiScore, setUiScore] = useState(0);
   const [gamePhase, setGamePhase] = useState<
@@ -169,7 +176,10 @@ export default function Game({
     myWon: boolean;
     scores: { username: string; score: number }[];
   } | null>(null);
-  const [rematchVotes, setRematchVotes] = useState<{ votes: number; total: number } | null>(null);
+  const [rematchVotes, setRematchVotes] = useState<{
+    votes: number;
+    total: number;
+  } | null>(null);
   const [hasVotedRematch, setHasVotedRematch] = useState(false);
 
   // Canvas responsive scaling
@@ -210,7 +220,7 @@ export default function Game({
   function sendChat() {
     const text = chatInput.trim();
     if (!text || !socketRef.current) return;
-    socketRef.current.emit("chat_send", { text });
+    socketRef.current.send("chat_send", { text });
     setChatInput("");
   }
 
@@ -382,8 +392,7 @@ export default function Game({
     spawnCoins(x, topH);
     if ((g.rng?.() ?? Math.random()) < 0.3 && !g.isPowered)
       spawnMushroom(x, topH);
-    if ((g.rng?.() ?? Math.random()) < 0.18)
-      spawnPoison(x, topH);
+    if ((g.rng?.() ?? Math.random()) < 0.18) spawnPoison(x, topH);
   }
 
   function initPipes() {
@@ -603,8 +612,16 @@ export default function Game({
         for (let si = 0; si < 5; si++) {
           const outerA = (si * 4 * Math.PI) / 5 - Math.PI / 2;
           const innerA = outerA + Math.PI / 5;
-          if (si === 0) ctx.moveTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
-          else ctx.lineTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
+          if (si === 0)
+            ctx.moveTo(
+              Math.cos(outerA) * r * 0.55,
+              Math.sin(outerA) * r * 0.55,
+            );
+          else
+            ctx.lineTo(
+              Math.cos(outerA) * r * 0.55,
+              Math.sin(outerA) * r * 0.55,
+            );
           ctx.lineTo(Math.cos(innerA) * r * 0.25, Math.sin(innerA) * r * 0.25);
         }
         ctx.closePath();
@@ -629,10 +646,18 @@ export default function Game({
     // Poison clouds (flappy mode only)
     if (!g.dinoMode) {
       g.poisons.forEach((poison) => {
-        const pulse = 0.55 + 0.45 * Math.abs(Math.sin(g.frame * 0.08 + poison.x * 0.01));
+        const pulse =
+          0.55 + 0.45 * Math.abs(Math.sin(g.frame * 0.08 + poison.x * 0.01));
         ctx.save();
         ctx.globalAlpha = 0.72 * pulse;
-        const pGrad = ctx.createRadialGradient(poison.x, poison.y, 4, poison.x, poison.y, poison.r);
+        const pGrad = ctx.createRadialGradient(
+          poison.x,
+          poison.y,
+          4,
+          poison.x,
+          poison.y,
+          poison.r,
+        );
         pGrad.addColorStop(0, "rgba(80,200,60,0.95)");
         pGrad.addColorStop(0.5, "rgba(50,160,30,0.6)");
         pGrad.addColorStop(1, "rgba(20,100,10,0)");
@@ -680,8 +705,8 @@ export default function Game({
 
     // Opponents: ghost pigs at their actual Y positions (both flappy and dino modes)
     g.opponents.forEach((op) => {
-      const opW = g.dinoMode ? 30 : (op.bigMode ? 52 : 40);
-      const opH = g.dinoMode ? 30 : (op.bigMode ? 44 : 34);
+      const opW = g.dinoMode ? 30 : op.bigMode ? 52 : 40;
+      const opH = g.dinoMode ? 30 : op.bigMode ? 44 : 34;
       const opX = g.dinoMode ? 78 : 96;
       const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
       ctx.globalAlpha = op.alive ? 0.5 : 0.2;
@@ -778,7 +803,18 @@ export default function Game({
     const { w: bW, h: bH } = g.birdSize;
     const bx = 100;
     const by2 = H - g.birdY - bH;
-    drawCharacter(ctx, bx, by2, bW, bH, g.isPowered, g.bigMode, g.frame, pigColor, character);
+    drawCharacter(
+      ctx,
+      bx,
+      by2,
+      bW,
+      bH,
+      g.isPowered,
+      g.bigMode,
+      g.frame,
+      pigColor,
+      character,
+    );
 
     // Player label (grey when dead/spectating)
     ctx.fillStyle = g.over ? "rgba(255,100,100,0.8)" : "#fff";
@@ -1068,17 +1104,36 @@ export default function Game({
 
   function drawBear(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "brown",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "brown",
   ) {
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["brown"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
     bodyGrad.addColorStop(0, bodyLight);
     bodyGrad.addColorStop(1, bodyDark);
     ctx.fillStyle = bodyGrad;
@@ -1086,122 +1141,238 @@ export default function Game({
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     const earR = w < 40 ? 5 : 8;
     // Outer ears
     ctx.fillStyle = strokeColor;
-    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2);
+    ctx.fill();
     // Inner ears
     ctx.fillStyle = bodyLight;
-    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2);
+    ctx.fill();
 
     // Snout
     ctx.fillStyle = bodyLight;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.58,
+      w < 40 ? 5 : 9,
+      w < 40 ? 4 : 7,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#333";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.75, y + h * 0.52, w < 40 ? 1.5 : 3, w < 40 ? 1 : 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.75,
+      y + h * 0.52,
+      w < 40 ? 1.5 : 3,
+      w < 40 ? 1 : 2,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     // Eye
     ctx.fillStyle = "#2d2d2d";
-    ctx.beginPath(); ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2);
+    ctx.fill();
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawPanda(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "white",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "white",
   ) {
     void colorId; // panda uses fixed white body; color ignored
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
     // White body
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
-    bodyGrad.addColorStop(0, "#f8f8f8"); bodyGrad.addColorStop(1, "#d8d8d8");
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
+    bodyGrad.addColorStop(0, "#f8f8f8");
+    bodyGrad.addColorStop(1, "#d8d8d8");
     ctx.fillStyle = bodyGrad;
     ctx.strokeStyle = "#999";
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     // Black round ears
     ctx.fillStyle = "#222";
-    ctx.beginPath(); ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
+    ctx.fill();
 
     // Black eye patch
     ctx.fillStyle = "#111";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.61, y + h * 0.37, w < 40 ? 4 : 7, w < 40 ? 3.5 : 6, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.61,
+      y + h * 0.37,
+      w < 40 ? 4 : 7,
+      w < 40 ? 3.5 : 6,
+      0.3,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     // White + black eye
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "#111";
-    ctx.beginPath(); ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2);
+    ctx.fill();
 
     // Snout
     ctx.fillStyle = "#f0f0f0";
-    ctx.strokeStyle = "#bbb"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#bbb";
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.58,
+      w < 40 ? 5 : 9,
+      w < 40 ? 4 : 7,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#555";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.53, w < 40 ? 1.5 : 2.5, w < 40 ? 1 : 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.53,
+      w < 40 ? 1.5 : 2.5,
+      w < 40 ? 1 : 1.5,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawDinoChar(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "green",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "green",
   ) {
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["green"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
-    bodyGrad.addColorStop(0, bodyLight); bodyGrad.addColorStop(1, bodyDark);
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
+    bodyGrad.addColorStop(0, bodyLight);
+    bodyGrad.addColorStop(1, bodyDark);
     ctx.fillStyle = bodyGrad;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     // Dorsal spines
     const spineCount = w < 40 ? 2 : 3;
@@ -1213,28 +1384,52 @@ export default function Game({
       ctx.moveTo(sx - 2, y + h * 0.12);
       ctx.lineTo(sx, y + h * 0.12 - sh);
       ctx.lineTo(sx + 2, y + h * 0.12);
-      ctx.closePath(); ctx.fill();
+      ctx.closePath();
+      ctx.fill();
     }
 
     // Yellow slit eye
     ctx.fillStyle = "#ffd700";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 3.5 : 6, w < 40 ? 3 : 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.65,
+      y + h * 0.38,
+      w < 40 ? 3.5 : 6,
+      w < 40 ? 3 : 5,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
-    ctx.strokeStyle = strokeColor; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.fillStyle = "#111";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 1 : 2, w < 40 ? 2.5 : 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.65,
+      y + h * 0.38,
+      w < 40 ? 1 : 2,
+      w < 40 ? 2.5 : 4,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2);
+    ctx.fill();
 
     // Nostril
     ctx.fillStyle = strokeColor;
-    ctx.beginPath(); ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2);
+    ctx.fill();
 
     // Tail
-    ctx.strokeStyle = strokeColor; ctx.lineWidth = w < 40 ? 2.5 : 4;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = w < 40 ? 2.5 : 4;
     ctx.beginPath();
     ctx.moveTo(x + 5, y + h * 0.5);
     ctx.quadraticCurveTo(x - 4, y + h * 0.5, x - 8, y + h * 0.68);
@@ -1251,98 +1446,240 @@ export default function Game({
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawCharacter(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number,
-    colorId: string, characterType: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string,
+    characterType: string,
   ) {
     switch (characterType) {
-      case "bear":  return drawBear(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      case "panda": return drawPanda(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      case "dino":  return drawDinoChar(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      default:      return drawPig(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "bear":
+        return drawBear(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "panda":
+        return drawPanda(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "dino":
+        return drawDinoChar(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      default:
+        return drawPig(ctx, x, y, w, h, powered, bigMode, frame, colorId);
     }
   }
 
   // ── GAME TICK ─────────────────────────────────────────
-  const tick = useCallback((dtFactor = 1) => {
-    const g = gameRef.current;
-    if (!g.started || g.over) return;
+  const tick = useCallback(
+    (dtFactor = 1) => {
+      const g = gameRef.current;
+      if (!g.started || g.over) return;
 
-    if (g.dinoMode) {
-      // ── Dino physics (flappy coords: higher birdY = visually higher on screen) ──
-      // Gravity is negative here because decreasing birdY moves pig DOWN visually
-      const gravity = -0.65;
-      g.dinoVelocity += gravity;
-      g.birdY += g.dinoVelocity;
+      if (g.dinoMode) {
+        // ── Dino physics (flappy coords: higher birdY = visually higher on screen) ──
+        // Gravity is negative here because decreasing birdY moves pig DOWN visually
+        const gravity = -0.65;
+        g.dinoVelocity += gravity;
+        g.birdY += g.dinoVelocity;
 
-      // Clamp to ground
-      if (g.birdY <= g.dinoGroundY) {
-        g.birdY = g.dinoGroundY;
-        g.dinoVelocity = 0;
-        g.dinoIsJumping = false;
-      }
-
-      // Move & cleanup cacti
-      for (const c of g.cacti) c.x -= g.pipeSpeed * dtFactor;
-      g.cacti = g.cacti.filter((c) => c.x > -60);
-
-      // Spawn next cactus when last one scrolled past the gap threshold
-      const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
-      if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
-        const height = 44 + Math.floor(Math.random() * 40);
-        g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
-        g.dinoNextGap = 300 + Math.random() * 270;
-        spawnDinoCoins(CONFIG.width + 60);
-        if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
-      }
-
-      // Collision check + cactus-passed scoring
-      const bW = g.birdSize.w;
-      const bH = g.birdSize.h;
-      const birdLeft = 100,
-        birdRight = 100 + bW;
-      let hitCactus = false;
-      for (const cactus of g.cacti) {
-        if (
-          birdRight > cactus.x + 4 &&
-          birdLeft < cactus.x + 16 &&
-          g.birdY < cactus.height - 6
-        ) {
-          hitCactus = true;
-          break;
+        // Clamp to ground
+        if (g.birdY <= g.dinoGroundY) {
+          g.birdY = g.dinoGroundY;
+          g.dinoVelocity = 0;
+          g.dinoIsJumping = false;
         }
-        if (!cactus.passed && cactus.x + 20 < birdLeft) {
-          cactus.passed = true;
-          g.score++;
-          g.pipesPassedCount++;
-          setUiScore(g.score);
-          if (g.pipesPassedCount % 5 === 0)
-            g.pipeSpeed = Math.min(g.pipeSpeed + 0.3, 14);
+
+        // Move & cleanup cacti
+        for (const c of g.cacti) c.x -= g.pipeSpeed * dtFactor;
+        g.cacti = g.cacti.filter((c) => c.x > -60);
+
+        // Spawn next cactus when last one scrolled past the gap threshold
+        const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
+        if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
+          const height = 44 + Math.floor(Math.random() * 40);
+          g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
+          g.dinoNextGap = 300 + Math.random() * 270;
+          spawnDinoCoins(CONFIG.width + 60);
+          if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
         }
-      }
-      if (hitCactus && !g.bigMode) {
-        endGame();
+
+        // Collision check + cactus-passed scoring
+        const bW = g.birdSize.w;
+        const bH = g.birdSize.h;
+        const birdLeft = 100,
+          birdRight = 100 + bW;
+        let hitCactus = false;
+        for (const cactus of g.cacti) {
+          if (
+            birdRight > cactus.x + 4 &&
+            birdLeft < cactus.x + 16 &&
+            g.birdY < cactus.height - 6
+          ) {
+            hitCactus = true;
+            break;
+          }
+          if (!cactus.passed && cactus.x + 20 < birdLeft) {
+            cactus.passed = true;
+            g.score++;
+            g.pipesPassedCount++;
+            setUiScore(g.score);
+            if (g.pipesPassedCount % 5 === 0)
+              g.pipeSpeed = Math.min(g.pipeSpeed + 0.3, 14);
+          }
+        }
+        if (hitCactus && !g.bigMode) {
+          endGame();
+          return;
+        }
+
+        // Coin collection (dino mode)
+        g.coins = g.coins.filter((coin) => {
+          if (coin.collected) return false;
+          coin.x -= g.pipeSpeed * dtFactor;
+          if (coin.x < -40) return false;
+          const r = coin.radius;
+          const cx = coin.x + r,
+            cy2 = coin.y + r;
+          const bCx = 100 + bW / 2,
+            bCy = CONFIG.height - g.birdY - bH / 2;
+          if (
+            Math.abs(cx - bCx) < bW / 2 + r &&
+            Math.abs(cy2 - bCy) < bH / 2 + r
+          ) {
+            coin.collected = true;
+            g.score += coin.value;
+            setUiScore(g.score);
+            playOink();
+            return false;
+          }
+          return true;
+        });
+
+        // Mushroom collection (dino mode)
+        g.mushrooms = g.mushrooms.filter((m) => {
+          m.x -= g.pipeSpeed * dtFactor;
+          if (m.x < -60) return false;
+          const mx = m.x + 18,
+            my = m.y + 18;
+          const bCx = 100 + bW / 2,
+            bCy = CONFIG.height - g.birdY - bH / 2;
+          if (
+            Math.abs(mx - bCx) < bW / 2 + 18 &&
+            Math.abs(my - bCy) < bH / 2 + 18
+          ) {
+            m.collected = true;
+            activateMushroom();
+            return false;
+          }
+          return true;
+        });
+
+        // Sync dino position/score to multiplayer
+        if (!solo && socketRef.current) {
+          socketRef.current.send("player_update", {
+            y: g.birdY,
+            score: g.score,
+            alive: true,
+            bigMode: g.bigMode,
+          });
+        }
+
+        draw();
         return;
       }
 
-      // Coin collection (dino mode)
+      const gravity = -0.5;
+      const jumpStrength = 9;
+
+      g.birdVelocity += gravity;
+      g.birdY += g.birdVelocity;
+
+      if (g.birdY <= 0) {
+        endGame();
+        return;
+      }
+      if (g.birdY >= CONFIG.height - 20 - g.birdSize.h) {
+        g.birdY = CONFIG.height - 20 - g.birdSize.h;
+        g.birdVelocity = 0;
+      }
+
+      // Pipes
+      const { w: bW, h: bH } = g.birdSize;
+      const birdLeft = 100,
+        birdRight = 100 + bW;
+      const birdTop = CONFIG.height - g.birdY - bH;
+      const birdBottom = CONFIG.height - g.birdY;
+
+      g.pipes.forEach((pipe) => {
+        pipe.x -= g.pipeSpeed * dtFactor;
+        const px = pipe.x,
+          pr = pipe.x + 60;
+
+        if (birdRight > px + 5 && birdLeft < pr - 5) {
+          const inTop = birdTop < pipe.topH;
+          const inBottom = birdBottom > CONFIG.height - pipe.bottomH;
+          if (inTop || inBottom) {
+            if (g.isPowered) {
+              // Coin power: unlimited pipe crushing while active
+              if (!pipe.crushed) {
+                pipe.crushed = true;
+                playCrush();
+                setTimeout(() => {
+                  pipe.crushed = false;
+                }, 400);
+              }
+            } else if (g.bigMode) {
+              // Mushroom immunity: ignore all hits for 1 second, no crush effect
+            } else if (!pipe.crushed) {
+              endGame();
+              return;
+            }
+          }
+        } else {
+          pipe.crushed = false;
+        }
+
+        if (!pipe.passed && pipe.x < 80) {
+          pipe.passed = true;
+          g.score++;
+          g.pipesPassedCount++;
+          setUiScore(g.score);
+          if (g.pipesPassedCount >= 20 && !g.pipesWiggling)
+            g.pipesWiggling = true;
+          if (g.pipesPassedCount % 5 === 0) g.pipeSpeed += 0.3;
+        }
+      });
+
+      if (g.pipes.length > 0 && g.pipes[0].x < -100) {
+        g.pipes.shift();
+        makePipe(g.pipes[g.pipes.length - 1].x + 600);
+      }
+
+      // Coins
       g.coins = g.coins.filter((coin) => {
         if (coin.collected) return false;
         coin.x -= g.pipeSpeed * dtFactor;
         if (coin.x < -40) return false;
         const r = coin.radius;
-        const cx = coin.x + r, cy2 = coin.y + r;
+        const cx = coin.x + r,
+          cy2 = coin.y + r;
         const bCx = 100 + bW / 2,
           bCy = CONFIG.height - g.birdY - bH / 2;
-        if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
+        if (
+          Math.abs(cx - bCx) < bW / 2 + r &&
+          Math.abs(cy2 - bCy) < bH / 2 + r
+        ) {
           coin.collected = true;
           g.score += coin.value;
           setUiScore(g.score);
@@ -1352,7 +1689,26 @@ export default function Game({
         return true;
       });
 
-      // Mushroom collection (dino mode)
+      // Poison clouds
+      g.poisons = g.poisons.filter((poison) => {
+        poison.x -= g.pipeSpeed * dtFactor;
+        if (poison.x + poison.r < 0) return false;
+        const bCx = 100 + bW / 2;
+        const bCy = CONFIG.height - g.birdY - bH / 2;
+        const dist = Math.sqrt((bCx - poison.x) ** 2 + (bCy - poison.y) ** 2);
+        if (dist < poison.r) {
+          poison.contactTime++;
+          if (poison.contactTime % 12 === 0) {
+            g.score = Math.max(0, g.score - 1);
+            setUiScore(g.score);
+          }
+        } else {
+          poison.contactTime = 0;
+        }
+        return true;
+      });
+
+      // Mushrooms
       g.mushrooms = g.mushrooms.filter((m) => {
         m.x -= g.pipeSpeed * dtFactor;
         if (m.x < -60) return false;
@@ -1371,158 +1727,22 @@ export default function Game({
         return true;
       });
 
-      // Sync dino position/score to multiplayer
+      // Sync to multiplayer
       if (!solo && socketRef.current) {
-        socketRef.current.emit("player_update", {
+        socketRef.current.send("player_update", {
           y: g.birdY,
           score: g.score,
           alive: true,
+          powered: g.isPowered,
           bigMode: g.bigMode,
         });
       }
 
       draw();
-      return;
-    }
-
-    const gravity = -0.5;
-    const jumpStrength = 9;
-
-    g.birdVelocity += gravity;
-    g.birdY += g.birdVelocity;
-
-    if (g.birdY <= 0) {
-      endGame();
-      return;
-    }
-    if (g.birdY >= CONFIG.height - 20 - g.birdSize.h) {
-      g.birdY = CONFIG.height - 20 - g.birdSize.h;
-      g.birdVelocity = 0;
-    }
-
-    // Pipes
-    const { w: bW, h: bH } = g.birdSize;
-    const birdLeft = 100,
-      birdRight = 100 + bW;
-    const birdTop = CONFIG.height - g.birdY - bH;
-    const birdBottom = CONFIG.height - g.birdY;
-
-    g.pipes.forEach((pipe) => {
-      pipe.x -= g.pipeSpeed * dtFactor;
-      const px = pipe.x,
-        pr = pipe.x + 60;
-
-      if (birdRight > px + 5 && birdLeft < pr - 5) {
-        const inTop = birdTop < pipe.topH;
-        const inBottom = birdBottom > CONFIG.height - pipe.bottomH;
-        if (inTop || inBottom) {
-          if (g.isPowered) {
-            // Coin power: unlimited pipe crushing while active
-            if (!pipe.crushed) {
-              pipe.crushed = true;
-              playCrush();
-              setTimeout(() => {
-                pipe.crushed = false;
-              }, 400);
-            }
-          } else if (g.bigMode) {
-            // Mushroom immunity: ignore all hits for 1 second, no crush effect
-          } else if (!pipe.crushed) {
-            endGame();
-            return;
-          }
-        }
-      } else {
-        pipe.crushed = false;
-      }
-
-      if (!pipe.passed && pipe.x < 80) {
-        pipe.passed = true;
-        g.score++;
-        g.pipesPassedCount++;
-        setUiScore(g.score);
-        if (g.pipesPassedCount >= 20 && !g.pipesWiggling)
-          g.pipesWiggling = true;
-        if (g.pipesPassedCount % 5 === 0) g.pipeSpeed += 0.3;
-      }
-    });
-
-    if (g.pipes.length > 0 && g.pipes[0].x < -100) {
-      g.pipes.shift();
-      makePipe(g.pipes[g.pipes.length - 1].x + 600);
-    }
-
-    // Coins
-    g.coins = g.coins.filter((coin) => {
-      if (coin.collected) return false;
-      coin.x -= g.pipeSpeed * dtFactor;
-      if (coin.x < -40) return false;
-      const r = coin.radius;
-      const cx = coin.x + r, cy2 = coin.y + r;
-      const bCx = 100 + bW / 2,
-        bCy = CONFIG.height - g.birdY - bH / 2;
-      if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
-        coin.collected = true;
-        g.score += coin.value;
-        setUiScore(g.score);
-        playOink();
-        return false;
-      }
-      return true;
-    });
-
-    // Poison clouds
-    g.poisons = g.poisons.filter((poison) => {
-      poison.x -= g.pipeSpeed * dtFactor;
-      if (poison.x + poison.r < 0) return false;
-      const bCx = 100 + bW / 2;
-      const bCy = CONFIG.height - g.birdY - bH / 2;
-      const dist = Math.sqrt((bCx - poison.x) ** 2 + (bCy - poison.y) ** 2);
-      if (dist < poison.r) {
-        poison.contactTime++;
-        if (poison.contactTime % 12 === 0) {
-          g.score = Math.max(0, g.score - 1);
-          setUiScore(g.score);
-        }
-      } else {
-        poison.contactTime = 0;
-      }
-      return true;
-    });
-
-    // Mushrooms
-    g.mushrooms = g.mushrooms.filter((m) => {
-      m.x -= g.pipeSpeed * dtFactor;
-      if (m.x < -60) return false;
-      const mx = m.x + 18,
-        my = m.y + 18;
-      const bCx = 100 + bW / 2,
-        bCy = CONFIG.height - g.birdY - bH / 2;
-      if (
-        Math.abs(mx - bCx) < bW / 2 + 18 &&
-        Math.abs(my - bCy) < bH / 2 + 18
-      ) {
-        m.collected = true;
-        activateMushroom();
-        return false;
-      }
-      return true;
-    });
-
-    // Sync to multiplayer
-    if (!solo && socketRef.current) {
-      socketRef.current.emit("player_update", {
-        y: g.birdY,
-        score: g.score,
-        alive: true,
-        powered: g.isPowered,
-        bigMode: g.bigMode,
-      });
-    }
-
-    draw();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draw, solo]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [draw, solo],
+  );
 
   function endGame() {
     const g = gameRef.current;
@@ -1567,7 +1787,7 @@ export default function Game({
         draw();
       }, 1500);
     } else if (socketRef.current) {
-      socketRef.current.emit("player_died", { score: g.score });
+      socketRef.current.send("player_died", { score: g.score });
       // Reset velocity so the pig falls from death position
       g.birdVelocity = 0;
       // Keep spectator loop alive so dead players can watch others
@@ -1722,220 +1942,211 @@ export default function Game({
     );
   }
 
-  // ── SOCKET ────────────────────────────────────────────
+  // ── COLYSEUS (MULTIPLAYER) ────────────────────────────
   useEffect(() => {
-    if (solo) return; // solo players don't need multiplayer socket
-    // Guard against React StrictMode double-invoke:
-    // cancelled flag prevents the async fetch callback from creating a socket
-    // after the cleanup has already run.
+    if (solo) return;
     let cancelled = false;
 
-    const externalUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
-    const socketPath = externalUrl ? "/socket.io" : "/api/socketio";
+    const colyseusUrl =
+      process.env.NEXT_PUBLIC_COLYSEUS_URL ||
+      (() => {
+        const port = parseInt(window.location.port, 10) || 80;
+        const wsPort = port === 3000 ? 3001 : port + 1;
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${window.location.hostname}:${wsPort}`;
+      })();
 
-    // Wake up the socket.io server endpoint (only needed for embedded server)
-    const wakeup = externalUrl
-      ? Promise.resolve()
-      : fetch("/api/socketio").then(() => {});
-    wakeup.finally(() => {
-      if (cancelled) return; // cleanup already ran — abort
+    const client = new ColyseusClient(colyseusUrl);
 
-      const socket = io(externalUrl || undefined, {
-        path: socketPath,
-        transports: ["websocket", "polling"],
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 1000,
-        reconnectionDelayMax: 5000,
-      });
-      socketRef.current = socket;
+    client
+      .joinOrCreate("flappy_room", {
+        roomCode: roomId,
+        username,
+        pigColor,
+        character,
+        speed: initialSpeed || CONFIG.baseSpeed,
+        password: password || "",
+        gameMode: dinoMode ? "dino" : "flappy",
+      })
+      .then((room) => {
+        if (cancelled) {
+          room.leave();
+          return;
+        }
+        socketRef.current = room;
+        setSocketId(room.sessionId);
 
-      function joinRoom() {
-        socket.emit("join_room", {
-          roomId,
-          username,
-          pigColor,
-          character,
-          speed: initialSpeed || CONFIG.baseSpeed,
-          password: password || "",
-        });
-      }
-
-      socket.on("connect", () => {
-        setSocketId(socket.id ?? "");
-        joinRoom();
-      });
-
-      // On reconnect, rejoin room and request state sync
-      socket.on("reconnect", () => {
-        joinRoom();
-      });
-
-      socket.on(
-        "room_state",
-        ({
-          players,
-          host,
-          speed,
-        }: {
-          players: PlayerState[];
-          host?: string;
-          speed?: number;
-        }) => {
-          setRoomPlayers(players);
-          setIsHost(socket.id === host);
-          if (speed !== undefined) {
+        // ── State sync via onStateChange ──
+        room.onStateChange((rawState: unknown) => {
+          const state = rawState as Record<string, unknown>;
+          const playersMap = state.players as Map<
+            string,
+            Record<string, unknown>
+          >;
+          if (!playersMap || typeof playersMap.forEach !== "function") return;
+          const allPlayers: PlayerState[] = [];
+          playersMap.forEach(
+            (player: Record<string, unknown>, sessionId: string) => {
+              const p: PlayerState = {
+                id: sessionId,
+                username: player.username as string,
+                y: player.y as number,
+                score: player.score as number,
+                alive: player.alive as boolean,
+                powered: (player.powered as boolean) ?? false,
+                bigMode: (player.bigMode as boolean) ?? false,
+                pigColor: player.pigColor as string,
+                character: player.character as string,
+                slot: player.slot as number,
+              };
+              allPlayers.push(p);
+              if (sessionId !== room.sessionId) {
+                gameRef.current.opponents.set(sessionId, p);
+              }
+            },
+          );
+          // Remove opponents that left
+          gameRef.current.opponents.forEach((_, id) => {
+            if (!playersMap.has(id)) gameRef.current.opponents.delete(id);
+          });
+          setRoomPlayers(allPlayers);
+          setIsHost((state.host as string) === room.sessionId);
+          const speed = state.speed as number | undefined;
+          if (speed !== undefined && speed !== gameRef.current.initialSpeed) {
             setRoomSpeed(speed);
             gameRef.current.initialSpeed = speed;
           }
-          // Replace opponents map cleanly to avoid stale entries
-          gameRef.current.opponents.clear();
-          players.forEach((p) => {
-            if (p.id !== socket.id) gameRef.current.opponents.set(p.id, p);
-          });
-        },
-      );
+        });
 
-      socket.on("player_joined", (p: PlayerState) => {
-        // player_joined is now supplementary; room_state broadcast handles the full list
-        gameRef.current.opponents.set(p.id, p);
-        setOpponentName(p.username);
-      });
+        // ── Messages ──
+        room.onMessage(
+          "game_start",
+          ({
+            countdown: cd,
+            seed,
+            speed,
+          }: {
+            countdown: number;
+            seed?: number;
+            speed?: number;
+          }) => {
+            if (seed !== undefined) gameRef.current.gameSeed = seed;
+            if (speed !== undefined) gameRef.current.initialSpeed = speed;
+            if (gameRef.current.started && !gameRef.current.over) return;
+            setResultData(null);
+            setRematchVotes(null);
+            setHasVotedRematch(false);
+            gameRef.current.deathParticles = [];
+            gameRef.current.winParticles = [];
+            startCountdown(cd, startGame);
+          },
+        );
 
-      socket.on(
-        "game_start",
-        ({
-          countdown: cd,
-          seed,
-          speed,
-        }: {
-          countdown: number;
-          seed?: number;
-          speed?: number;
-        }) => {
-          if (seed !== undefined) gameRef.current.gameSeed = seed;
-          if (speed !== undefined) {
-            gameRef.current.initialSpeed = speed;
-          }
-          if (gameRef.current.started && !gameRef.current.over) return;
-          setResultData(null);
-          setRematchVotes(null);
-          setHasVotedRematch(false);
-          gameRef.current.deathParticles = [];
-          gameRef.current.winParticles = [];
-          startCountdown(cd, startGame);
-        },
-      );
+        room.onMessage(
+          "rematch_votes",
+          ({ votes, total }: { votes: number; total: number }) => {
+            setRematchVotes({ votes, total });
+          },
+        );
 
-      socket.on(
-        "rematch_votes",
-        ({ votes, total }: { votes: number; total: number }) => {
-          setRematchVotes({ votes, total });
-        },
-      );
+        room.onMessage("player_died", ({ id }: { id: string }) => {
+          const op = gameRef.current.opponents.get(id);
+          if (op) op.alive = false;
+        });
 
-      socket.on("opponent_update", (data: PlayerState) => {
-        const op = gameRef.current.opponents.get(data.id);
-        if (op) Object.assign(op, data);
-      });
+        room.onMessage("player_left", ({ id }: { id: string }) => {
+          gameRef.current.opponents.delete(id);
+          setRoomPlayers((prev) => prev.filter((p) => p.id !== id));
+        });
 
-      socket.on("player_died", ({ id }: { id: string }) => {
-        const op = gameRef.current.opponents.get(id);
-        if (op) op.alive = false;
-      });
-
-      socket.on("player_left", ({ id }: { id: string }) => {
-        gameRef.current.opponents.delete(id);
-        setRoomPlayers((prev) => prev.filter((p) => p.id !== id));
-      });
-
-      // Room reset after game_over_result (server resets after 5s)
-      socket.on(
-        "room_reset",
-        ({
-          players,
-          host,
-          speed,
-        }: {
-          players: PlayerState[];
-          host: string;
-          speed?: number;
-        }) => {
-          setRoomPlayers(players);
-          setIsHost(socket.id === host);
-          if (speed !== undefined) setRoomSpeed(speed);
-          gameRef.current.opponents.clear();
-          players.forEach((p) => {
-            if (p.id !== socket.id) gameRef.current.opponents.set(p.id, p);
-          });
-          setGamePhase("waiting");
-          setResultData(null);
-          setRematchVotes(null);
-          setHasVotedRematch(false);
-        },
-      );
-
-      socket.on("last_survivor", ({ targetScore }: { targetScore: number }) => {
-        setTargetScore(targetScore);
-      });
-
-      socket.on(
-        "game_over_result",
-        ({
-          winnerId,
-          winnerName,
-          scores,
-        }: {
-          winnerId: string;
-          winnerName: string;
-          scores: { id: string; username: string; score: number }[];
-        }) => {
-          const myWon = winnerId === socket.id;
-          setTargetScore(null);
-
-          // Stop spectator loop before showing result overlay
-          const g2 = gameRef.current;
-          if (g2.animLoop) {
-            clearInterval(g2.animLoop);
-            g2.animLoop = null;
-          }
-
-          if (myWon) {
-            playWin();
-            spawnWinParticles();
-          }
-
-          const animLoop = setInterval(() => draw(), 20);
-          setTimeout(() => {
-            clearInterval(animLoop);
-            setResultData({
-              winner: winnerName,
-              myWon,
-              scores: scores.map((s) => ({
-                username: s.username,
-                score: s.score,
-              })),
+        room.onMessage(
+          "room_reset",
+          ({
+            players,
+            host,
+            speed,
+          }: {
+            players: PlayerState[];
+            host: string;
+            speed?: number;
+          }) => {
+            setRoomPlayers(players);
+            setIsHost(host === room.sessionId);
+            if (speed !== undefined) setRoomSpeed(speed);
+            gameRef.current.opponents.clear();
+            players.forEach((p) => {
+              if (p.id !== room.sessionId)
+                gameRef.current.opponents.set(p.id, p);
             });
-            setGamePhase("result");
-            draw();
-          }, 2000);
-        },
-      );
+            setGamePhase("waiting");
+            setResultData(null);
+            setRematchVotes(null);
+            setHasVotedRematch(false);
+          },
+        );
 
-      // Chat — use showChatRef to avoid stale closure
-      socket.on("chat_message", (msg: ChatMsg) => {
-        setChatMessages((prev) => [...prev, msg].slice(-100));
-        setUnreadChat((n) => (showChatRef.current ? 0 : n + 1));
+        room.onMessage(
+          "last_survivor",
+          ({ targetScore }: { targetScore: number }) => {
+            setTargetScore(targetScore);
+          },
+        );
+
+        room.onMessage(
+          "game_over_result",
+          ({
+            winnerId,
+            winnerName,
+            scores,
+          }: {
+            winnerId: string;
+            winnerName: string;
+            scores: { id: string; username: string; score: number }[];
+          }) => {
+            const myWon = winnerId === room.sessionId;
+            setTargetScore(null);
+            const g2 = gameRef.current;
+            if (g2.animLoop) {
+              clearInterval(g2.animLoop);
+              g2.animLoop = null;
+            }
+            if (myWon) {
+              playWin();
+              spawnWinParticles();
+            }
+            const animLoop = setInterval(() => draw(), 20);
+            setTimeout(() => {
+              clearInterval(animLoop);
+              setResultData({
+                winner: winnerName,
+                myWon,
+                scores: scores.map((s) => ({
+                  username: s.username,
+                  score: s.score,
+                })),
+              });
+              setGamePhase("result");
+              draw();
+            }, 2000);
+          },
+        );
+
+        room.onMessage("chat_message", (msg: ChatMsg) => {
+          setChatMessages((prev) => [...prev, msg].slice(-100));
+          setUnreadChat((n) => (showChatRef.current ? 0 : n + 1));
+        });
+        room.onMessage("chat_history", (msgs: ChatMsg[]) => {
+          setChatMessages(msgs.slice(-100));
+        });
+      })
+      .catch(() => {
+        // Connection failed — will show in UI via missing socketId
       });
-      socket.on("chat_history", (msgs: ChatMsg[]) => {
-        setChatMessages(msgs.slice(-100));
-      });
-    });
 
     return () => {
-      cancelled = true; // block pending fetch callback from creating socket
-      socketRef.current?.disconnect();
-      socketRef.current = null; // reset so next mount starts fresh
+      cancelled = true;
+      socketRef.current?.leave();
+      socketRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1950,10 +2161,22 @@ export default function Game({
     }
     return () => {
       if (t !== null) clearTimeout(t);
-      if (g.gameLoop) { clearInterval(g.gameLoop); g.gameLoop = null; }
-      if (g.countdownIv) { clearInterval(g.countdownIv); g.countdownIv = null; }
-      if (g.countdownDrawIv) { clearInterval(g.countdownDrawIv); g.countdownDrawIv = null; }
-      if (g.animLoop) { clearInterval(g.animLoop); g.animLoop = null; }
+      if (g.gameLoop) {
+        clearInterval(g.gameLoop);
+        g.gameLoop = null;
+      }
+      if (g.countdownIv) {
+        clearInterval(g.countdownIv);
+        g.countdownIv = null;
+      }
+      if (g.countdownDrawIv) {
+        clearInterval(g.countdownDrawIv);
+        g.countdownDrawIv = null;
+      }
+      if (g.animLoop) {
+        clearInterval(g.animLoop);
+        g.animLoop = null;
+      }
       g.started = false;
       g.over = false;
     };
@@ -1991,7 +2214,7 @@ export default function Game({
       startCountdown(5, startGame);
     } else {
       // Ask server to reset the room (host only; non-host button is hidden)
-      socketRef.current?.emit("request_room_reset");
+      socketRef.current?.send("request_room_reset");
     }
   }
 
@@ -2100,7 +2323,7 @@ export default function Game({
                       onChange={(e) => {
                         const v = parseFloat(e.target.value);
                         setRoomSpeed(v);
-                        socketRef.current?.emit("update_speed", { speed: v });
+                        socketRef.current?.send("update_speed", { speed: v });
                       }}
                       className="w-full accent-pink-400"
                     />
@@ -2110,7 +2333,7 @@ export default function Game({
                     </div>
                   </div>
                   <button
-                    onClick={() => socketRef.current?.emit("room_ready")}
+                    onClick={() => socketRef.current?.send("room_ready")}
                     disabled={roomPlayers.length < 2}
                     className="w-full py-3 bg-green-500 hover:bg-green-400 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xl font-bold rounded-full shadow-lg transition active:scale-95"
                   >
@@ -2188,8 +2411,7 @@ export default function Game({
                       key={p.id}
                       className="flex items-center gap-1 bg-white/15 px-2 py-1 rounded-full text-sm font-bold"
                       style={{
-                        color:
-                          p.id === socketId ? "#ffd700" : "#fff",
+                        color: p.id === socketId ? "#ffd700" : "#fff",
                       }}
                     >
                       <span
@@ -2295,7 +2517,7 @@ export default function Game({
                     onClick={() => {
                       if (hasVotedRematch) return;
                       setHasVotedRematch(true);
-                      socketRef.current?.emit("vote_rematch");
+                      socketRef.current?.send("vote_rematch");
                     }}
                     disabled={hasVotedRematch}
                     className="px-8 py-3 bg-green-500 hover:bg-green-400 disabled:bg-green-700 disabled:cursor-not-allowed text-white text-lg font-bold rounded-full shadow-lg transition active:scale-95"
@@ -2353,9 +2575,7 @@ export default function Game({
         className="flex items-center gap-2 bg-white/20 backdrop-blur px-4 py-2 rounded-full text-white font-bold shadow"
         style={{ width: CONFIG.width * canvasScale, maxWidth: "100%" }}
       >
-        <span className="text-sm flex-1">
-          ⚡ Kecepatan: {roomSpeed}
-        </span>
+        <span className="text-sm flex-1">⚡ Kecepatan: {roomSpeed}</span>
         {!solo && (
           <button
             onClick={() => {

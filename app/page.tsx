@@ -31,7 +31,9 @@ export default function AuthPage() {
   const [character, setCharacter] = useState("pig");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [leaderboard, setLeaderboard] = useState<{ username: string; best_score: number }[]>([]);
+  const [leaderboard, setLeaderboard] = useState<
+    { username: string; best_score: number }[]
+  >([]);
   const router = useRouter();
 
   useEffect(() => {
@@ -84,39 +86,49 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-linear-to-br from-[#8f6c2f] via-[#C4955A] to-[#8B5E3C]  px-4 py-8">
-      <div className="bg-white/20 backdrop-blur-md rounded-3xl p-8 shadow-2xl w-full max-w-sm">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-linear-to-br from-[#8f6c2f] via-[#C4955A] to-[#8B5E3C] px-4 py-6">
+      <div className="bg-white/15 backdrop-blur-md rounded-2xl p-5 shadow-2xl w-full max-w-xs border border-white/10">
         {/* Header */}
-        <div className="text-center mb-6">
-          <div className="text-6xl mb-2 animate-bounce inline-block">
+        <div className="text-center mb-4">
+          <div className="text-5xl mb-1 animate-bounce inline-block">
             {selectedChar.emoji}
           </div>
-          <h1 className="text-3xl font-extrabold text-white drop-shadow">
-            Ahhhh BABIIII
+          <h1 className="text-xl font-extrabold text-white drop-shadow">
+            Flappy Piggies
           </h1>
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-black/20 rounded-2xl p-1 mb-6">
+        <div className="flex gap-1 bg-black/20 rounded-xl p-0.5 mb-4">
           <button
-            onClick={() => { setTab("login"); setError(""); }}
-            className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${
-              tab === "login" ? "bg-white text-pink-600 shadow" : "text-white/70 hover:text-white"
+            onClick={() => {
+              setTab("login");
+              setError("");
+            }}
+            className={`flex-1 py-1.5 rounded-lg font-bold text-sm transition ${
+              tab === "login"
+                ? "bg-white text-pink-600 shadow"
+                : "text-white/60 hover:text-white"
             }`}
           >
             Masuk
           </button>
           <button
-            onClick={() => { setTab("register"); setError(""); }}
-            className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${
-              tab === "register" ? "bg-white text-pink-600 shadow" : "text-white/70 hover:text-white"
+            onClick={() => {
+              setTab("register");
+              setError("");
+            }}
+            className={`flex-1 py-1.5 rounded-lg font-bold text-sm transition ${
+              tab === "register"
+                ? "bg-white text-pink-600 shadow"
+                : "text-white/60 hover:text-white"
             }`}
           >
             Daftar
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-2.5">
           {/* Username */}
           <input
             type="text"
@@ -124,7 +136,7 @@ export default function AuthPage() {
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             maxLength={20}
-            className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+            className="px-3 py-2.5 rounded-xl text-sm font-semibold outline-none bg-white/85 text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-pink-300"
           />
 
           {/* Password */}
@@ -134,7 +146,7 @@ export default function AuthPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             maxLength={64}
-            className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+            className="px-3 py-2.5 rounded-xl text-sm font-semibold outline-none bg-white/85 text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-pink-300"
           />
 
           {/* Confirm password (register only) */}
@@ -145,31 +157,35 @@ export default function AuthPage() {
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               maxLength={64}
-              className="px-4 py-3 rounded-xl text-base font-semibold outline-none bg-white/80 text-gray-700 placeholder-gray-400 focus:ring-4 focus:ring-pink-300"
+              className="px-3 py-2.5 rounded-xl text-sm font-semibold outline-none bg-white/85 text-gray-700 placeholder-gray-400 focus:ring-2 focus:ring-pink-300"
             />
           )}
 
           {/* Character picker (register only) */}
           {tab === "register" && (
             <div>
-              <p className="text-white font-semibold mb-2 text-sm">
-                🎮 Pilih Karakter:{" "}
-                <span className="text-yellow-200">{selectedChar.emoji} {selectedChar.label}</span>
+              <p className="text-white/80 font-semibold mb-1.5 text-xs">
+                🎮 Karakter:{" "}
+                <span className="text-yellow-200">
+                  {selectedChar.emoji} {selectedChar.label}
+                </span>
               </p>
-              <div className="grid grid-cols-4 gap-2">
+              <div className="grid grid-cols-4 gap-1.5">
                 {CHARACTERS.map((c) => (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => setCharacter(c.id)}
-                    className={`flex flex-col items-center justify-center py-2 rounded-xl text-2xl transition active:scale-90 ${
+                    className={`flex flex-col items-center justify-center py-1.5 rounded-xl text-xl transition active:scale-90 ${
                       character === c.id
                         ? "bg-white/40 ring-2 ring-white"
                         : "bg-white/10 hover:bg-white/20"
                     }`}
                   >
                     <span>{c.emoji}</span>
-                    <span className="text-white text-xs font-bold mt-0.5">{c.label}</span>
+                    <span className="text-white text-[10px] font-bold mt-0.5">
+                      {c.label}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -179,17 +195,17 @@ export default function AuthPage() {
           {/* Color picker (register only) */}
           {tab === "register" && (
             <div>
-              <p className="text-white font-semibold mb-2 text-sm">
+              <p className="text-white/80 font-semibold mb-1.5 text-xs">
                 🎨 Warna:{" "}
                 <span className="text-yellow-200">{selectedColor.label}</span>
               </p>
-              <div className="grid grid-cols-5 gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {PIG_COLOR_OPTIONS.map((c) => (
                   <button
                     key={c.id}
                     type="button"
                     onClick={() => setPigColor(c.id)}
-                    className="h-8 rounded-xl transition-transform active:scale-90"
+                    className="w-7 h-7 rounded-full transition-transform active:scale-90"
                     style={{
                       backgroundColor: c.hex,
                       border: `3px solid ${pigColor === c.id ? c.accent : "transparent"}`,
@@ -204,7 +220,7 @@ export default function AuthPage() {
           )}
 
           {error && (
-            <p className="text-red-200 text-sm font-semibold text-center bg-red-500/20 rounded-xl px-3 py-2">
+            <p className="text-red-200 text-xs font-semibold text-center bg-red-500/20 rounded-xl px-3 py-2">
               {error}
             </p>
           )}
@@ -212,36 +228,66 @@ export default function AuthPage() {
           <button
             type="submit"
             disabled={loading}
-            className="py-3 bg-pink-500 hover:bg-pink-400 active:scale-95 text-white text-lg font-bold rounded-xl shadow-lg transition disabled:opacity-60"
+            className="py-2.5 bg-pink-500 hover:bg-pink-400 active:scale-95 text-white text-sm font-bold rounded-xl shadow-lg transition disabled:opacity-60 mt-0.5"
           >
-            {loading ? "Loading..." : tab === "login" ? "Masuk 🚀" : "Daftar & Main! 🎮"}
+            {loading
+              ? "Loading..."
+              : tab === "login"
+                ? "Masuk 🚀"
+                : "Daftar & Main! 🎮"}
           </button>
         </form>
 
-        <div className="mt-4 text-center">
-          <a href="/leaderboard" className="text-white/70 hover:text-white text-sm underline">
-            🏆 Lihat Leaderboard
+        <div className="mt-3 flex items-center justify-center gap-3 text-xs">
+          <a
+            href="/leaderboard"
+            className="text-white/50 hover:text-white transition"
+          >
+            🏆 Leaderboard
+          </a>
+          <span className="text-white/20">·</span>
+          <a
+            href="/discussion"
+            className="text-white/50 hover:text-white transition"
+          >
+            💬 Diskusi
           </a>
         </div>
       </div>
 
       {/* Mini leaderboard */}
       {leaderboard.length > 0 && (
-        <div className="bg-white/20 backdrop-blur-md rounded-2xl p-5 shadow-xl w-full max-w-sm">
-          <h2 className="text-white font-bold text-lg mb-3 text-center">🏆 Top Pemain</h2>
+        <div className="bg-white/15 backdrop-blur-md rounded-2xl p-4 shadow-xl w-full max-w-xs border border-white/10">
+          <h2 className="text-white font-bold text-sm mb-2 text-center">
+            🏆 Top Pemain
+          </h2>
           <div className="flex flex-col gap-1">
             {leaderboard.map((entry, i) => (
-              <div key={i} className="flex items-center justify-between bg-white/10 rounded-xl px-3 py-1.5">
-                <span className="text-white font-semibold">
-                  {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `#${i + 1}`}{" "}
+              <div
+                key={i}
+                className="flex items-center justify-between bg-white/10 rounded-xl px-3 py-1.5"
+              >
+                <span className="text-white text-xs font-semibold">
+                  {i === 0
+                    ? "🥇"
+                    : i === 1
+                      ? "🥈"
+                      : i === 2
+                        ? "🥉"
+                        : `#${i + 1}`}{" "}
                   {entry.username}
                 </span>
-                <span className="text-yellow-200 font-bold">{entry.best_score}</span>
+                <span className="text-yellow-200 text-xs font-bold">
+                  {entry.best_score}
+                </span>
               </div>
             ))}
           </div>
-          <div className="mt-3 text-center">
-            <a href="/leaderboard" className="text-white/60 hover:text-white text-xs underline">
+          <div className="mt-2 text-center">
+            <a
+              href="/leaderboard"
+              className="text-white/40 hover:text-white text-xs"
+            >
               Lihat semua →
             </a>
           </div>

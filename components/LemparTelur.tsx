@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+import { Client as ColyseusClient, Room as ColyseusRoom } from "colyseus.js";
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const W = 800;
@@ -220,7 +220,7 @@ const PLACE_MEDALS = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"];
 // ── Component ─────────────────────────────────────────────────────────────
 export default function LemparTelur({ roomId, username, pigColor }: Props) {
   const canvasRef  = useRef<HTMLCanvasElement>(null);
-  const socketRef  = useRef<Socket | null>(null);
+  const socketRef  = useRef<ColyseusRoom | null>(null);
   const myIdRef    = useRef("solo-player");
   const rafRef     = useRef(0);
 
@@ -246,75 +246,76 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
     jumpPeakY:     0,
   }).current;
 
-  // ── Socket (multi only) ───────────────────────────────────────────────
+  // ── Colyseus (multi only) ───────────────────────────────────────────────
   useEffect(() => {
     if (isSolo) return;
-
-    const exUrl      = process.env.NEXT_PUBLIC_SOCKET_URL || "";
-    const socketPath = exUrl ? "/socket.io" : "/api/socketio";
-    const socket = io(exUrl || (typeof window !== "undefined" ? window.location.origin : ""), {
-      path: socketPath,
-      transports: ["websocket", "polling"],
-    });
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      myIdRef.current = socket.id ?? "?";
-      socket.emit("egg_join", { roomId, username, pigColor, character: "egg" });
-    });
-
-    socket.on("egg_room_state", ({ players, host, started }: { players: SrvPlayer[]; host: string; started: boolean }) => {
-      gs.players = players; gs.host = host;
-      if (!started) gs.phase = "lobby";
-      const me = players.find(p => p.id === myIdRef.current);
-      if (me) { gs.mySlot = me.slot; gs.x = EGG_SPAWN_X[me.slot] ?? W / 2; }
-    });
-
-    socket.on("egg_join_error", ({ error }: { error: string }) => {
-      alert(error); window.location.href = "/lobby";
-    });
-
-    socket.on("egg_game_start", ({ players, startTime }: { players: SrvPlayer[]; startTime: number }) => {
-      gs.players = players; gs.startTime = startTime;
-      gs.phase = "playing"; gs.worldY = 0; gs.vy = 0;
-      gs.myState = "resting"; gs.platformLevel = 0; gs.highestLevel = 0;
-      gs.camY = -H * 0.35; gs.jumpPressed = false; gs.jumpConsumed = false;
-      gs.playStart = Date.now();
-      gs.myPlatOffsetX = 0; gs.jumpPeakY = 0;
-      gs.others.clear();
-      const me = players.find(p => p.id === myIdRef.current);
-      if (me) { gs.mySlot = me.slot; gs.x = EGG_SPAWN_X[me.slot] ?? W / 2; }
-      players.forEach(p => {
-        if (p.id !== myIdRef.current)
-          gs.others.set(p.id, { id: p.id, username: p.username, slot: p.slot, worldY: 0, x: EGG_SPAWN_X[p.slot] ?? W/2, vy: 0, state: "resting", platformLevel: 0 });
-      });
-    });
-
-    socket.on("egg_player_jumped", ({ id }: { id: string }) => {
-      const o = gs.others.get(id); if (o) { o.state = "jumping"; o.vy = JUMP_SPEED; }
-    });
-    socket.on("egg_player_landed", ({ id, level }: { id: string; level: number }) => {
-      const o = gs.others.get(id); if (o) { o.state = "resting"; o.vy = 0; o.platformLevel = level; o.worldY = platWY(level); }
-    });
-    socket.on("egg_player_sync", ({ id, worldY, vy, state }: { id: string; worldY: number; vy: number; state: EState }) => {
-      const o = gs.others.get(id); if (o) { o.worldY = worldY; o.vy = vy; o.state = state; }
-    });
-    socket.on("egg_player_died", ({ id, players }: { id: string; players: SrvPlayer[] }) => {
-      gs.players = players;
-      const o = gs.others.get(id); if (o) o.state = "dead";
-      if (id === myIdRef.current && gs.phase === "playing") { gs.myState = "dead"; gs.phase = "spectating"; sndDie(); }
-    });
-    socket.on("egg_game_over", ({ winnerId, winnerName, players }: { winnerId: string|null; winnerName: string; players: SrvPlayer[] }) => {
-      gs.phase = "gameover"; gs.winnerId = winnerId; gs.winnerName = winnerName;
-      gs.players = players; gs.rematchVotes = 0;
-      if (winnerId === myIdRef.current) sndWin();
-    });
-    socket.on("egg_rematch_update", ({ votes, total }: { votes: number; total: number }) => {
-      gs.rematchVotes = votes; gs.rematchTotal = total;
-    });
-
-    return () => { socket.disconnect(); };
+    const colyseusUrl =
+      process.env.NEXT_PUBLIC_COLYSEUS_URL ||
+      (() => {
+        const port = parseInt(window.location.port, 10) || 80;
+        const wsPort = port === 3000 ? 3001 : port + 1;
+        const proto = window.location.protocol === "https:" ? "wss" : "ws";
+        return `${proto}://${window.location.hostname}:${wsPort}`;
+      })();
+    const client = new ColyseusClient(colyseusUrl);
+    let cancelled = false;
+    client
+      .joinOrCreate("egg_room", { roomCode: roomId, username, pigColor, character: "egg" })
+      .then((room) => {
+        if (cancelled) { room.leave(); return; }
+        socketRef.current = room;
+        myIdRef.current = room.sessionId;
+        room.onMessage("egg_room_state", ({ players, host, started }: { players: SrvPlayer[]; host: string; started: boolean }) => {
+          gs.players = players; gs.host = host;
+          if (!started) gs.phase = "lobby";
+          const me = players.find(p => p.id === myIdRef.current);
+          if (me) { gs.mySlot = me.slot; gs.x = EGG_SPAWN_X[me.slot] ?? W / 2; }
+        });
+        room.onMessage("egg_join_error", ({ error }: { error: string }) => {
+          alert(error); window.location.href = "/lobby";
+        });
+        room.onMessage("egg_game_start", ({ players, startTime }: { players: SrvPlayer[]; startTime: number }) => {
+          gs.players = players; gs.startTime = startTime;
+          gs.phase = "playing"; gs.worldY = 0; gs.vy = 0;
+          gs.myState = "resting"; gs.platformLevel = 0; gs.highestLevel = 0;
+          gs.camY = -H * 0.35; gs.jumpPressed = false; gs.jumpConsumed = false;
+          gs.playStart = Date.now();
+          gs.myPlatOffsetX = 0; gs.jumpPeakY = 0;
+          gs.others.clear();
+          const me = players.find(p => p.id === myIdRef.current);
+          if (me) { gs.mySlot = me.slot; gs.x = EGG_SPAWN_X[me.slot] ?? W / 2; }
+          players.forEach(p => {
+            if (p.id !== myIdRef.current)
+              gs.others.set(p.id, { id: p.id, username: p.username, slot: p.slot, worldY: 0, x: EGG_SPAWN_X[p.slot] ?? W/2, vy: 0, state: "resting", platformLevel: 0 });
+          });
+        });
+        room.onMessage("egg_player_jumped", ({ id }: { id: string }) => {
+          const o = gs.others.get(id); if (o) { o.state = "jumping"; o.vy = JUMP_SPEED; }
+        });
+        room.onMessage("egg_player_landed", ({ id, level }: { id: string; level: number }) => {
+          const o = gs.others.get(id); if (o) { o.state = "resting"; o.vy = 0; o.platformLevel = level; o.worldY = platWY(level); }
+        });
+        room.onMessage("egg_player_sync", ({ id, worldY, vy, state }: { id: string; worldY: number; vy: number; state: EState }) => {
+          const o = gs.others.get(id); if (o) { o.worldY = worldY; o.vy = vy; o.state = state; }
+        });
+        room.onMessage("egg_player_died", ({ id, players }: { id: string; players: SrvPlayer[] }) => {
+          gs.players = players;
+          const o = gs.others.get(id); if (o) o.state = "dead";
+          if (id === myIdRef.current && gs.phase === "playing") { gs.myState = "dead"; gs.phase = "spectating"; sndDie(); }
+        });
+        room.onMessage("egg_game_over", ({ winnerId, winnerName, players }: { winnerId: string|null; winnerName: string; players: SrvPlayer[] }) => {
+          gs.phase = "gameover"; gs.winnerId = winnerId; gs.winnerName = winnerName;
+          gs.players = players; gs.rematchVotes = 0;
+          if (winnerId === myIdRef.current) sndWin();
+        });
+        room.onMessage("egg_rematch_update", ({ votes, total }: { votes: number; total: number }) => {
+          gs.rematchVotes = votes; gs.rematchTotal = total;
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; socketRef.current?.leave(); socketRef.current = null; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, username, pigColor, isSolo]);
   }, [roomId, username, pigColor, isSolo]);
 
   // ── Keyboard ──────────────────────────────────────────────────────────
@@ -358,7 +359,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
           gs.jumpConsumed = true;
           gs.jumpPeakY = gs.worldY; // start tracking from launch height
           sndJump();
-          if (!gs.solo) socket?.emit("egg_jump", { fromLevel: gs.platformLevel });
+          if (!gs.solo) socket?.send("egg_jump", { fromLevel: gs.platformLevel });
         }
         if (!gs.jumpPressed) gs.jumpConsumed = false;
 
@@ -395,7 +396,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
                   if (lv > gs.highestLevel) gs.highestLevel = lv;
                   sndLand();
                   if (!gs.solo) {
-                    socket?.emit("egg_land", { level: lv });
+                    socket?.send("egg_land", { level: lv });
                     const me = gs.players.find(p => p.id === myId);
                     if (me) me.highestLevel = gs.highestLevel;
                   }
@@ -415,7 +416,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
               gs.phase = "gameover";
             } else {
               gs.phase = "spectating";
-              socket?.emit("egg_died");
+              socket?.send("egg_died");
               const me = gs.players.find(p => p.id === myId);
               if (me) me.alive = false;
             }
@@ -426,7 +427,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
         }
 
         if (!gs.solo && now - gs.lastSync > SYNC_MS) {
-          socket?.emit("egg_sync", { worldY: gs.worldY, vy: gs.vy, state: gs.myState });
+          socket?.send("egg_sync", { worldY: gs.worldY, vy: gs.vy, state: gs.myState });
           gs.lastSync = now;
         }
       }
@@ -592,7 +593,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
     if (gs.phase === "lobby") {
       if (gs.host === myIdRef.current && gs.players.length >= 2)
         if (cx >= W/2-85 && cx <= W/2+85 && cy >= H-115 && cy <= H-69)
-          socketRef.current?.emit("egg_start");
+          socketRef.current?.send("egg_start");
     } else if (gs.phase === "playing") {
       gs.jumpPressed = true;
       setTimeout(() => { gs.jumpPressed = false; gs.jumpConsumed = false; }, 100);
@@ -601,7 +602,7 @@ export default function LemparTelur({ roomId, username, pigColor }: Props) {
         if (cx >= W/2-90 && cx <= W/2+90 && cy >= H-108 && cy <= H-64) restartSolo();
       } else {
         if (cx >= W/2-95 && cx <= W/2+95 && cy >= H-108 && cy <= H-64)
-          socketRef.current?.emit("egg_rematch");
+          socketRef.current?.send("egg_rematch");
       }
     }
   }

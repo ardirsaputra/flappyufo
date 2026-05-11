@@ -1,21 +1,76 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Standalone Socket.IO server — deploy this on Railway / Render / Fly.io
+﻿// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Standalone Socket.IO server â€” deploy this on Railway / Render / Fly.io
 // when using Vercel for the Next.js frontend.
 //
 // Setup:
-//   1. npm install (uses root package.json — socket.io is already listed)
+//   1. npm install (uses root package.json â€” socket.io is already listed)
 //   2. Set env vars: ALLOWED_ORIGINS, PORT (optional)
 //   3. node socket-server.js
-// ─────────────────────────────────────────────────────────────────────────────
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 "use strict";
 
 const { createServer } = require("http");
 const { Server } = require("socket.io");
+const { Pool } = require("pg");
 
 const PORT = parseInt(process.env.PORT || "3001", 10);
+const COLYSEUS_PORT = parseInt(
+  process.env.COLYSEUS_PORT || String(PORT + 1),
+  10,
+);
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((s) => s.trim())
   : ["*"];
+
+// â”€â”€ DB pool for persistent lobby chat â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const dbPool = process.env.DATABASE_URL
+  ? new Pool({
+      connectionString: process.env.DATABASE_URL,
+      max: 3,
+      idleTimeoutMillis: 30000,
+    })
+  : null;
+
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+async function dbSaveLobbyChat(msg) {
+  if (!dbPool) return;
+  try {
+    await dbPool.query(
+      `INSERT INTO lobby_chat_messages (msg_id, username, pig_color, text, ts)
+       VALUES ($1, $2, $3, $4, $5) ON CONFLICT (msg_id) DO NOTHING`,
+      [msg.id, msg.username, msg.pigColor || "pink", msg.text, msg.ts],
+    );
+  } catch {
+    /* non-fatal */
+  }
+}
+
+async function dbLoadLobbyChatHistory() {
+  if (!dbPool) return [];
+  try {
+    const cutoff = Date.now() - SEVEN_DAYS_MS;
+    const res = await dbPool.query(
+      `SELECT msg_id AS id, username, pig_color AS "pigColor", text, ts
+       FROM lobby_chat_messages WHERE ts > $1 ORDER BY ts ASC LIMIT 100`,
+      [cutoff],
+    );
+    return res.rows;
+  } catch {
+    return [];
+  }
+}
+
+async function dbPurgeOldChat() {
+  if (!dbPool) return;
+  try {
+    await dbPool.query(`DELETE FROM lobby_chat_messages WHERE ts < $1`, [
+      Date.now() - SEVEN_DAYS_MS,
+    ]);
+  } catch {
+    /* non-fatal */
+  }
+}
 
 const httpServer = createServer((req, res) => {
   // Health-check endpoint
@@ -43,24 +98,18 @@ const io = new Server(httpServer, {
   pingInterval: 25000,
 });
 
-// ── State ──────────────────────────────────────────────────────────────────
-const rooms = new Map();
+// â”€â”€ State â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const lobbyPlayers = new Map();
-const chatMessages = new Map();
 const lobbyChatMessages = [];
 
-// Purge chat messages older than 1 hour every 5 minutes
+// Purge lobby chat every 5 minutes
 setInterval(
   () => {
-    const oneHourAgo = Date.now() - 3_600_000;
-    for (const [roomId, msgs] of chatMessages.entries()) {
-      const fresh = msgs.filter((m) => m.ts > oneHourAgo);
-      if (fresh.length === 0) chatMessages.delete(roomId);
-      else chatMessages.set(roomId, fresh);
-    }
-    const freshLobby = lobbyChatMessages.filter((m) => m.ts > oneHourAgo);
+    const sevenDaysAgo = Date.now() - SEVEN_DAYS_MS;
+    const freshLobby = lobbyChatMessages.filter((m) => m.ts > sevenDaysAgo);
     lobbyChatMessages.length = 0;
     freshLobby.forEach((m) => lobbyChatMessages.push(m));
+    dbPurgeOldChat();
   },
   5 * 60 * 1000,
 );
@@ -69,9 +118,8 @@ function broadcastLobby() {
   io.emit("lobby_players", Array.from(lobbyPlayers.values()));
 }
 
-// ── Socket handlers ────────────────────────────────────────────────────────
+// â”€â”€ Socket handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 io.on("connection", (socket) => {
-  let currentRoom = null;
   let currentUser = null;
 
   // LOBBY
@@ -83,12 +131,12 @@ io.on("connection", (socket) => {
       pigColor: pigColor || "pink",
     });
     broadcastLobby();
-    // Send recent lobby chat history to the joining player
-    const oneHourAgo = Date.now() - 3_600_000;
-    const history = lobbyChatMessages
-      .filter((m) => m.ts > oneHourAgo)
-      .slice(-50);
-    if (history.length > 0) socket.emit("lobby_chat_history", history);
+    // Send 7-day lobby chat history (from DB if available, else in-memory)
+    dbLoadLobbyChatHistory().then((dbHistory) => {
+      const history =
+        dbHistory.length > 0 ? dbHistory : lobbyChatMessages.slice(-100);
+      if (history.length > 0) socket.emit("lobby_chat_history", history);
+    });
   });
 
   socket.on("lobby_leave", () => {
@@ -112,6 +160,8 @@ io.on("connection", (socket) => {
     lobbyChatMessages.push(msg);
     if (lobbyChatMessages.length > 200)
       lobbyChatMessages.splice(0, lobbyChatMessages.length - 200);
+    // Persist to DB for 7-day retention
+    dbSaveLobbyChat(msg);
     io.emit("lobby_chat_message", msg);
   });
 
@@ -131,248 +181,21 @@ io.on("connection", (socket) => {
     if (fromId) io.to(fromId).emit("invite_go", { roomId, speed: speed ?? 3 });
   });
 
-  // ROOM
-  socket.on("join_room", ({ roomId, username, pigColor, speed }) => {
-    if (currentRoom === roomId) {
-      const r = rooms.get(roomId);
-      if (r) {
-        socket.emit("room_state", {
-          players: Array.from(r.players.values()),
-          started: r.started,
-          host: r.host,
-          speed: r.speed,
-        });
-        if (r.started) {
-          const elapsed = Math.floor((Date.now() - r.startTime) / 1000);
-          socket.emit("game_start", {
-            countdown: Math.max(0, 3 - elapsed),
-            seed: r.seed,
-            speed: r.speed,
-          });
-        }
-      }
-      return;
-    }
-
-    currentRoom = roomId;
-    currentUser = username;
-
-    if (!rooms.has(roomId)) {
-      rooms.set(roomId, {
-        id: roomId,
-        players: new Map(),
-        host: socket.id,
-        started: false,
-        startTime: 0,
-        seed: 0,
-        speed: speed || 3,
-      });
-    }
-
-    const room = rooms.get(roomId);
-    if (room.players.has(socket.id)) return;
-    if (room.players.size >= 10) return;
-
-    room.players.set(socket.id, {
-      id: socket.id,
-      username,
-      y: 300,
-      score: 0,
-      alive: true,
-      powered: false,
-      bigMode: false,
-      pigColor: pigColor || "pink",
-      slot: room.players.size,
-    });
-
-    socket.join(roomId);
-    lobbyPlayers.delete(socket.id);
-    broadcastLobby();
-
-    io.to(roomId).emit("room_state", {
-      players: Array.from(room.players.values()),
-      started: room.started,
-      host: room.host,
-      speed: room.speed,
-    });
-
-    if (room.started) {
-      const elapsed = Math.floor((Date.now() - room.startTime) / 1000);
-      socket.emit("game_start", {
-        countdown: Math.max(0, 3 - elapsed),
-        seed: room.seed,
-        speed: room.speed,
-      });
-    }
-
-    // Chat history
-    const oneHourAgo = Date.now() - 3_600_000;
-    const history = (chatMessages.get(roomId) || []).filter(
-      (m) => m.ts > oneHourAgo,
-    );
-    if (history.length > 0) socket.emit("chat_history", history);
-  });
-
-  socket.on("chat_send", ({ text }) => {
-    if (!currentRoom || !currentUser) return;
-    const trimmed = String(text).trim().slice(0, 200);
-    if (!trimmed) return;
-    const player = rooms.get(currentRoom)?.players.get(socket.id);
-    const msg = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      username: currentUser,
-      pigColor: player?.pigColor || "pink",
-      text: trimmed,
-      ts: Date.now(),
-    };
-    if (!chatMessages.has(currentRoom)) chatMessages.set(currentRoom, []);
-    chatMessages.get(currentRoom).push(msg);
-    io.to(currentRoom).emit("chat_message", msg);
-  });
-
-  socket.on("room_ready", () => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room || room.started || socket.id !== room.host) return;
-    if (room.players.size < 2) return;
-    room.started = true;
-    room.startTime = Date.now();
-    room.seed = Math.floor(Math.random() * 4294967296);
-    io.to(currentRoom).emit("game_start", {
-      countdown: 3,
-      seed: room.seed,
-      speed: room.speed,
-    });
-  });
-
-  socket.on("update_speed", ({ speed }) => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room || room.started || socket.id !== room.host) return;
-    room.speed = speed;
-    io.to(currentRoom).emit("room_state", {
-      players: Array.from(room.players.values()),
-      started: room.started,
-      host: room.host,
-      speed: room.speed,
-    });
-  });
-
-  socket.on("player_update", (data) => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room) return;
-    const player = room.players.get(socket.id);
-    if (player) {
-      Object.assign(player, data);
-      socket
-        .to(currentRoom)
-        .emit("opponent_update", { id: socket.id, ...data });
-    }
-  });
-
-  socket.on("player_died", ({ score }) => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room) return;
-    const player = room.players.get(socket.id);
-    if (player) {
-      player.alive = false;
-      player.score = score;
-    }
-
-    io.to(currentRoom).emit("player_died", { id: socket.id, score });
-
-    const alive = Array.from(room.players.values()).filter((p) => p.alive);
-    if (alive.length === 1) {
-      const deadScores = Array.from(room.players.values())
-        .filter((p) => !p.alive)
-        .map((p) => p.score);
-      io.to(alive[0].id).emit("last_survivor", {
-        targetScore: deadScores.length ? Math.max(...deadScores) : 0,
-      });
-    }
-    if (alive.length === 0) {
-      const allPlayers = Array.from(room.players.values());
-      const winner = allPlayers.sort((a, b) => b.score - a.score)[0];
-      io.to(currentRoom).emit("game_over_result", {
-        winnerId: winner.id,
-        winnerName: winner.username,
-        scores: allPlayers.map((p) => ({
-          id: p.id,
-          username: p.username,
-          score: p.score,
-        })),
-      });
-      setTimeout(() => {
-        if (!rooms.has(currentRoom)) return;
-        const r = rooms.get(currentRoom);
-        r.started = false;
-        r.players.forEach((p) => {
-          p.alive = true;
-          p.score = 0;
-          p.y = 300;
-          p.powered = false;
-          p.bigMode = false;
-        });
-        io.to(currentRoom).emit("room_reset", {
-          players: Array.from(r.players.values()),
-          host: r.host,
-          speed: r.speed,
-        });
-      }, 30000);
-    }
-  });
-
-  socket.on("request_room_reset", () => {
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room || socket.id !== room.host) return;
-    room.started = false;
-    room.players.forEach((p) => {
-      p.alive = true;
-      p.score = 0;
-      p.y = 300;
-      p.powered = false;
-      p.bigMode = false;
-    });
-    io.to(currentRoom).emit("room_reset", {
-      players: Array.from(room.players.values()),
-      host: room.host,
-      speed: room.speed,
-    });
-  });
-
   socket.on("disconnect", () => {
     lobbyPlayers.delete(socket.id);
     broadcastLobby();
-
-    if (!currentRoom) return;
-    const room = rooms.get(currentRoom);
-    if (!room) return;
-    room.players.delete(socket.id);
-    io.to(currentRoom).emit("player_left", { id: socket.id });
-
-    if (room.players.size === 0) {
-      rooms.delete(currentRoom);
-      return;
-    }
-
-    if (room.host === socket.id) {
-      const nextHost = Array.from(room.players.values())[0];
-      room.host = nextHost.id;
-      room.players.forEach((p, pid) => {
-        p.slot = Array.from(room.players.keys()).indexOf(pid);
-      });
-      io.to(currentRoom).emit("room_state", {
-        players: Array.from(room.players.values()),
-        started: room.started,
-        host: room.host,
-        speed: room.speed,
-      });
-    }
   });
 });
+
+// â”€â”€ Colyseus game server (game rooms only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+const { createColyseusServer } = require("./colyseus-server");
+const { createServer: createColyseusHttp } = require("http");
+const colyseusHttp = createColyseusHttp();
+createColyseusServer(colyseusHttp);
+colyseusHttp.listen(COLYSEUS_PORT, () => {
+  console.log(`Colyseus game server running on port ${COLYSEUS_PORT}`);
+});
+room.host = nextHost.id;
 
 httpServer.listen(PORT, () => {
   console.log(`Socket.IO server running on port ${PORT}`);
