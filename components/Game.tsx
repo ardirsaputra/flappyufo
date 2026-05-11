@@ -111,7 +111,14 @@ export default function Game({
       passed: boolean;
       crushed: boolean;
     }[],
-    coins: [] as { x: number; y: number; collected: boolean; animT: number; value: number; radius: number }[],
+    coins: [] as {
+      x: number;
+      y: number;
+      collected: boolean;
+      animT: number;
+      value: number;
+      radius: number;
+    }[],
     mushrooms: [] as { x: number; y: number; collected: boolean }[],
     poisons: [] as { x: number; y: number; r: number; contactTime: number }[],
     pipeSpeed: CONFIG.baseSpeed,
@@ -155,6 +162,9 @@ export default function Game({
   const socketRef = useRef<Socket | null>(null);
   const [socketId, setSocketId] = useState("");
   const [uiScore, setUiScore] = useState(0);
+  const [uiSpeed, setUiSpeed] = useState(initialSpeed || 3);
+  const [speedHint, setSpeedHint] = useState<string | null>(null);
+  const speedHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [gamePhase, setGamePhase] = useState<
     "waiting" | "countdown" | "playing" | "dead" | "result"
   >("waiting");
@@ -169,8 +179,20 @@ export default function Game({
     myWon: boolean;
     scores: { username: string; score: number }[];
   } | null>(null);
-  const [rematchVotes, setRematchVotes] = useState<{ votes: number; total: number } | null>(null);
+  const [rematchVotes, setRematchVotes] = useState<{
+    votes: number;
+    total: number;
+  } | null>(null);
   const [hasVotedRematch, setHasVotedRematch] = useState(false);
+
+  function showSpeedHint(message: string) {
+    setSpeedHint(message);
+    if (speedHintTimer.current) clearTimeout(speedHintTimer.current);
+    speedHintTimer.current = setTimeout(() => {
+      setSpeedHint(null);
+      speedHintTimer.current = null;
+    }, 1800);
+  }
 
   // Canvas responsive scaling
   const [canvasScale, setCanvasScale] = useState(1);
@@ -382,8 +404,7 @@ export default function Game({
     spawnCoins(x, topH);
     if ((g.rng?.() ?? Math.random()) < 0.3 && !g.isPowered)
       spawnMushroom(x, topH);
-    if ((g.rng?.() ?? Math.random()) < 0.18)
-      spawnPoison(x, topH);
+    if ((g.rng?.() ?? Math.random()) < 0.18) spawnPoison(x, topH);
   }
 
   function initPipes() {
@@ -603,8 +624,16 @@ export default function Game({
         for (let si = 0; si < 5; si++) {
           const outerA = (si * 4 * Math.PI) / 5 - Math.PI / 2;
           const innerA = outerA + Math.PI / 5;
-          if (si === 0) ctx.moveTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
-          else ctx.lineTo(Math.cos(outerA) * r * 0.55, Math.sin(outerA) * r * 0.55);
+          if (si === 0)
+            ctx.moveTo(
+              Math.cos(outerA) * r * 0.55,
+              Math.sin(outerA) * r * 0.55,
+            );
+          else
+            ctx.lineTo(
+              Math.cos(outerA) * r * 0.55,
+              Math.sin(outerA) * r * 0.55,
+            );
           ctx.lineTo(Math.cos(innerA) * r * 0.25, Math.sin(innerA) * r * 0.25);
         }
         ctx.closePath();
@@ -629,10 +658,18 @@ export default function Game({
     // Poison clouds (flappy mode only)
     if (!g.dinoMode) {
       g.poisons.forEach((poison) => {
-        const pulse = 0.55 + 0.45 * Math.abs(Math.sin(g.frame * 0.08 + poison.x * 0.01));
+        const pulse =
+          0.55 + 0.45 * Math.abs(Math.sin(g.frame * 0.08 + poison.x * 0.01));
         ctx.save();
         ctx.globalAlpha = 0.72 * pulse;
-        const pGrad = ctx.createRadialGradient(poison.x, poison.y, 4, poison.x, poison.y, poison.r);
+        const pGrad = ctx.createRadialGradient(
+          poison.x,
+          poison.y,
+          4,
+          poison.x,
+          poison.y,
+          poison.r,
+        );
         pGrad.addColorStop(0, "rgba(80,200,60,0.95)");
         pGrad.addColorStop(0.5, "rgba(50,160,30,0.6)");
         pGrad.addColorStop(1, "rgba(20,100,10,0)");
@@ -680,8 +717,8 @@ export default function Game({
 
     // Opponents: ghost pigs at their actual Y positions (both flappy and dino modes)
     g.opponents.forEach((op) => {
-      const opW = g.dinoMode ? 30 : (op.bigMode ? 52 : 40);
-      const opH = g.dinoMode ? 30 : (op.bigMode ? 44 : 34);
+      const opW = g.dinoMode ? 30 : op.bigMode ? 52 : 40;
+      const opH = g.dinoMode ? 30 : op.bigMode ? 44 : 34;
       const opX = g.dinoMode ? 78 : 96;
       const opY = Math.max(0, Math.min(H - opH - 20, H - op.y - opH));
       ctx.globalAlpha = op.alive ? 0.5 : 0.2;
@@ -778,7 +815,18 @@ export default function Game({
     const { w: bW, h: bH } = g.birdSize;
     const bx = 100;
     const by2 = H - g.birdY - bH;
-    drawCharacter(ctx, bx, by2, bW, bH, g.isPowered, g.bigMode, g.frame, pigColor, character);
+    drawCharacter(
+      ctx,
+      bx,
+      by2,
+      bW,
+      bH,
+      g.isPowered,
+      g.bigMode,
+      g.frame,
+      pigColor,
+      character,
+    );
 
     // Player label (grey when dead/spectating)
     ctx.fillStyle = g.over ? "rgba(255,100,100,0.8)" : "#fff";
@@ -1068,17 +1116,36 @@ export default function Game({
 
   function drawBear(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "brown",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "brown",
   ) {
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["brown"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
     bodyGrad.addColorStop(0, bodyLight);
     bodyGrad.addColorStop(1, bodyDark);
     ctx.fillStyle = bodyGrad;
@@ -1086,122 +1153,238 @@ export default function Game({
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     const earR = w < 40 ? 5 : 8;
     // Outer ears
     ctx.fillStyle = strokeColor;
-    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.22, y + 2, earR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, earR, 0, Math.PI * 2);
+    ctx.fill();
     // Inner ears
     ctx.fillStyle = bodyLight;
-    ctx.beginPath(); ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.22, y + 2, earR * 0.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, earR * 0.5, 0, Math.PI * 2);
+    ctx.fill();
 
     // Snout
     ctx.fillStyle = bodyLight;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.58,
+      w < 40 ? 5 : 9,
+      w < 40 ? 4 : 7,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#333";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.75, y + h * 0.52, w < 40 ? 1.5 : 3, w < 40 ? 1 : 2, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.75,
+      y + h * 0.52,
+      w < 40 ? 1.5 : 3,
+      w < 40 ? 1 : 2,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     // Eye
     ctx.fillStyle = "#2d2d2d";
-    ctx.beginPath(); ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.6, y + h * 0.38, w < 40 ? 2 : 4, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.61, y + h * 0.36, w < 40 ? 0.8 : 1.5, 0, Math.PI * 2);
+    ctx.fill();
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawPanda(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "white",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "white",
   ) {
     void colorId; // panda uses fixed white body; color ignored
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
     // White body
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
-    bodyGrad.addColorStop(0, "#f8f8f8"); bodyGrad.addColorStop(1, "#d8d8d8");
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
+    bodyGrad.addColorStop(0, "#f8f8f8");
+    bodyGrad.addColorStop(1, "#d8d8d8");
     ctx.fillStyle = bodyGrad;
     ctx.strokeStyle = "#999";
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     // Black round ears
     ctx.fillStyle = "#222";
-    ctx.beginPath(); ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.2, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + 2, w < 40 ? 5 : 8, 0, Math.PI * 2);
+    ctx.fill();
 
     // Black eye patch
     ctx.fillStyle = "#111";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.61, y + h * 0.37, w < 40 ? 4 : 7, w < 40 ? 3.5 : 6, 0.3, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.61,
+      y + h * 0.37,
+      w < 40 ? 4 : 7,
+      w < 40 ? 3.5 : 6,
+      0.3,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     // White + black eye
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.63, y + h * 0.37, w < 40 ? 2 : 3.5, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "#111";
-    ctx.beginPath(); ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.64, y + h * 0.37, w < 40 ? 1 : 1.8, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.65, y + h * 0.35, w < 40 ? 0.5 : 0.9, 0, Math.PI * 2);
+    ctx.fill();
 
     // Snout
     ctx.fillStyle = "#f0f0f0";
-    ctx.strokeStyle = "#bbb"; ctx.lineWidth = 1;
+    ctx.strokeStyle = "#bbb";
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.58, w < 40 ? 5 : 9, w < 40 ? 4 : 7, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.58,
+      w < 40 ? 5 : 9,
+      w < 40 ? 4 : 7,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+    ctx.stroke();
     ctx.fillStyle = "#555";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.73, y + h * 0.53, w < 40 ? 1.5 : 2.5, w < 40 ? 1 : 1.5, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.73,
+      y + h * 0.53,
+      w < 40 ? 1.5 : 2.5,
+      w < 40 ? 1 : 1.5,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawDinoChar(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number, colorId: string = "green",
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string = "green",
   ) {
     const palette = PIG_COLOR_MAP[colorId] || PIG_COLOR_MAP["green"];
     const [bodyLight, bodyDark] = palette.body;
     const strokeColor = palette.stroke;
     ctx.save();
-    if (powered) { ctx.shadowColor = "#ffd700"; ctx.shadowBlur = 20; }
-    if (bigMode) { ctx.shadowColor = "#ff69b4"; ctx.shadowBlur = 15; }
+    if (powered) {
+      ctx.shadowColor = "#ffd700";
+      ctx.shadowBlur = 20;
+    }
+    if (bigMode) {
+      ctx.shadowColor = "#ff69b4";
+      ctx.shadowBlur = 15;
+    }
 
-    const bodyGrad = ctx.createRadialGradient(x + w * 0.4, y + h * 0.4, 2, x + w / 2, y + h / 2, w * 0.7);
-    bodyGrad.addColorStop(0, bodyLight); bodyGrad.addColorStop(1, bodyDark);
+    const bodyGrad = ctx.createRadialGradient(
+      x + w * 0.4,
+      y + h * 0.4,
+      2,
+      x + w / 2,
+      y + h / 2,
+      w * 0.7,
+    );
+    bodyGrad.addColorStop(0, bodyLight);
+    bodyGrad.addColorStop(1, bodyDark);
     ctx.fillStyle = bodyGrad;
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = w < 40 ? 1.5 : 2;
     ctx.beginPath();
     ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.fill();
+    ctx.stroke();
 
     // Dorsal spines
     const spineCount = w < 40 ? 2 : 3;
@@ -1213,28 +1396,52 @@ export default function Game({
       ctx.moveTo(sx - 2, y + h * 0.12);
       ctx.lineTo(sx, y + h * 0.12 - sh);
       ctx.lineTo(sx + 2, y + h * 0.12);
-      ctx.closePath(); ctx.fill();
+      ctx.closePath();
+      ctx.fill();
     }
 
     // Yellow slit eye
     ctx.fillStyle = "#ffd700";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 3.5 : 6, w < 40 ? 3 : 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.65,
+      y + h * 0.38,
+      w < 40 ? 3.5 : 6,
+      w < 40 ? 3 : 5,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
-    ctx.strokeStyle = strokeColor; ctx.lineWidth = 1; ctx.stroke();
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.fillStyle = "#111";
     ctx.beginPath();
-    ctx.ellipse(x + w * 0.65, y + h * 0.38, w < 40 ? 1 : 2, w < 40 ? 2.5 : 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(
+      x + w * 0.65,
+      y + h * 0.38,
+      w < 40 ? 1 : 2,
+      w < 40 ? 2.5 : 4,
+      0,
+      0,
+      Math.PI * 2,
+    );
     ctx.fill();
     ctx.fillStyle = "white";
-    ctx.beginPath(); ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.66, y + h * 0.36, w < 40 ? 0.6 : 1, 0, Math.PI * 2);
+    ctx.fill();
 
     // Nostril
     ctx.fillStyle = strokeColor;
-    ctx.beginPath(); ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + w * 0.84, y + h * 0.42, w < 40 ? 1.2 : 2, 0, Math.PI * 2);
+    ctx.fill();
 
     // Tail
-    ctx.strokeStyle = strokeColor; ctx.lineWidth = w < 40 ? 2.5 : 4;
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = w < 40 ? 2.5 : 4;
     ctx.beginPath();
     ctx.moveTo(x + 5, y + h * 0.5);
     ctx.quadraticCurveTo(x - 4, y + h * 0.5, x - 8, y + h * 0.68);
@@ -1251,98 +1458,249 @@ export default function Game({
 
     if (powered) {
       const flapY = Math.sin(frame * 0.3) * 4;
-      ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x + w * 0.3, y + h * 0.5); ctx.lineTo(x - 12, y + h * 0.3 + flapY); ctx.stroke();
+      ctx.strokeStyle = "#ffd700";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x + w * 0.3, y + h * 0.5);
+      ctx.lineTo(x - 12, y + h * 0.3 + flapY);
+      ctx.stroke();
     }
     ctx.restore();
   }
 
   function drawCharacter(
     ctx: CanvasRenderingContext2D,
-    x: number, y: number, w: number, h: number,
-    powered: boolean, bigMode: boolean, frame: number,
-    colorId: string, characterType: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    powered: boolean,
+    bigMode: boolean,
+    frame: number,
+    colorId: string,
+    characterType: string,
   ) {
     switch (characterType) {
-      case "bear":  return drawBear(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      case "panda": return drawPanda(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      case "dino":  return drawDinoChar(ctx, x, y, w, h, powered, bigMode, frame, colorId);
-      default:      return drawPig(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "bear":
+        return drawBear(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "panda":
+        return drawPanda(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      case "dino":
+        return drawDinoChar(ctx, x, y, w, h, powered, bigMode, frame, colorId);
+      default:
+        return drawPig(ctx, x, y, w, h, powered, bigMode, frame, colorId);
     }
   }
 
   // ── GAME TICK ─────────────────────────────────────────
-  const tick = useCallback((dtFactor = 1) => {
-    const g = gameRef.current;
-    if (!g.started || g.over) return;
+  const tick = useCallback(
+    (dtFactor = 1) => {
+      const g = gameRef.current;
+      if (!g.started || g.over) return;
 
-    if (g.dinoMode) {
-      // ── Dino physics (flappy coords: higher birdY = visually higher on screen) ──
-      // Gravity is negative here because decreasing birdY moves pig DOWN visually
-      const gravity = -0.65;
-      g.dinoVelocity += gravity;
-      g.birdY += g.dinoVelocity;
+      if (g.dinoMode) {
+        // ── Dino physics (flappy coords: higher birdY = visually higher on screen) ──
+        // Gravity is negative here because decreasing birdY moves pig DOWN visually
+        const gravity = -0.65;
+        g.dinoVelocity += gravity;
+        g.birdY += g.dinoVelocity;
 
-      // Clamp to ground
-      if (g.birdY <= g.dinoGroundY) {
-        g.birdY = g.dinoGroundY;
-        g.dinoVelocity = 0;
-        g.dinoIsJumping = false;
-      }
-
-      // Move & cleanup cacti
-      for (const c of g.cacti) c.x -= g.pipeSpeed * dtFactor;
-      g.cacti = g.cacti.filter((c) => c.x > -60);
-
-      // Spawn next cactus when last one scrolled past the gap threshold
-      const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
-      if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
-        const height = 44 + Math.floor(Math.random() * 40);
-        g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
-        g.dinoNextGap = 300 + Math.random() * 270;
-        spawnDinoCoins(CONFIG.width + 60);
-        if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
-      }
-
-      // Collision check + cactus-passed scoring
-      const bW = g.birdSize.w;
-      const bH = g.birdSize.h;
-      const birdLeft = 100,
-        birdRight = 100 + bW;
-      let hitCactus = false;
-      for (const cactus of g.cacti) {
-        if (
-          birdRight > cactus.x + 4 &&
-          birdLeft < cactus.x + 16 &&
-          g.birdY < cactus.height - 6
-        ) {
-          hitCactus = true;
-          break;
+        // Clamp to ground
+        if (g.birdY <= g.dinoGroundY) {
+          g.birdY = g.dinoGroundY;
+          g.dinoVelocity = 0;
+          g.dinoIsJumping = false;
         }
-        if (!cactus.passed && cactus.x + 20 < birdLeft) {
-          cactus.passed = true;
-          g.score++;
-          g.pipesPassedCount++;
-          setUiScore(g.score);
-          if (g.pipesPassedCount % 5 === 0)
-            g.pipeSpeed = Math.min(g.pipeSpeed + 0.3, 14);
+
+        // Move & cleanup cacti
+        for (const c of g.cacti) c.x -= g.pipeSpeed * dtFactor;
+        g.cacti = g.cacti.filter((c) => c.x > -60);
+
+        // Spawn next cactus when last one scrolled past the gap threshold
+        const lastC = g.cacti.length > 0 ? g.cacti[g.cacti.length - 1] : null;
+        if (!lastC || lastC.x < CONFIG.width - g.dinoNextGap) {
+          const height = 44 + Math.floor(Math.random() * 40);
+          g.cacti.push({ x: CONFIG.width + 60, height, passed: false });
+          g.dinoNextGap = 300 + Math.random() * 270;
+          spawnDinoCoins(CONFIG.width + 60);
+          if (Math.random() < 0.3) spawnDinoMushroom(CONFIG.width + 60);
         }
-      }
-      if (hitCactus && !g.bigMode) {
-        endGame();
+
+        // Collision check + cactus-passed scoring
+        const bW = g.birdSize.w;
+        const bH = g.birdSize.h;
+        const birdLeft = 100,
+          birdRight = 100 + bW;
+        let hitCactus = false;
+        for (const cactus of g.cacti) {
+          if (
+            birdRight > cactus.x + 4 &&
+            birdLeft < cactus.x + 16 &&
+            g.birdY < cactus.height - 6
+          ) {
+            hitCactus = true;
+            break;
+          }
+          if (!cactus.passed && cactus.x + 20 < birdLeft) {
+            cactus.passed = true;
+            g.score++;
+            g.pipesPassedCount++;
+            setUiScore(g.score);
+            if (g.pipesPassedCount % 5 === 0) {
+              g.pipeSpeed = Math.min(g.pipeSpeed + 0.3, 14);
+              const newSpeed = Math.round(g.pipeSpeed * 10) / 10;
+              setUiSpeed(newSpeed);
+              showSpeedHint(`Taik makin ngebut: ${newSpeed.toFixed(1)}`);
+            }
+          }
+        }
+        if (hitCactus && !g.bigMode) {
+          endGame();
+          return;
+        }
+
+        // Coin collection (dino mode)
+        g.coins = g.coins.filter((coin) => {
+          if (coin.collected) return false;
+          coin.x -= g.pipeSpeed * dtFactor;
+          if (coin.x < -40) return false;
+          const r = coin.radius;
+          const cx = coin.x + r,
+            cy2 = coin.y + r;
+          const bCx = 100 + bW / 2,
+            bCy = CONFIG.height - g.birdY - bH / 2;
+          if (
+            Math.abs(cx - bCx) < bW / 2 + r &&
+            Math.abs(cy2 - bCy) < bH / 2 + r
+          ) {
+            coin.collected = true;
+            g.score += coin.value;
+            setUiScore(g.score);
+            playOink();
+            return false;
+          }
+          return true;
+        });
+
+        // Mushroom collection (dino mode)
+        g.mushrooms = g.mushrooms.filter((m) => {
+          m.x -= g.pipeSpeed * dtFactor;
+          if (m.x < -60) return false;
+          const mx = m.x + 18,
+            my = m.y + 18;
+          const bCx = 100 + bW / 2,
+            bCy = CONFIG.height - g.birdY - bH / 2;
+          if (
+            Math.abs(mx - bCx) < bW / 2 + 18 &&
+            Math.abs(my - bCy) < bH / 2 + 18
+          ) {
+            m.collected = true;
+            activateMushroom();
+            return false;
+          }
+          return true;
+        });
+
+        // Sync dino position/score to multiplayer
+        if (!solo && socketRef.current) {
+          socketRef.current.emit("player_update", {
+            y: g.birdY,
+            score: g.score,
+            alive: true,
+            bigMode: g.bigMode,
+          });
+        }
+
+        draw();
         return;
       }
 
-      // Coin collection (dino mode)
+      const gravity = -0.5;
+      const jumpStrength = 9;
+
+      g.birdVelocity += gravity;
+      g.birdY += g.birdVelocity;
+
+      if (g.birdY <= 0) {
+        endGame();
+        return;
+      }
+      if (g.birdY >= CONFIG.height - 20 - g.birdSize.h) {
+        g.birdY = CONFIG.height - 20 - g.birdSize.h;
+        g.birdVelocity = 0;
+      }
+
+      // Pipes
+      const { w: bW, h: bH } = g.birdSize;
+      const birdLeft = 100,
+        birdRight = 100 + bW;
+      const birdTop = CONFIG.height - g.birdY - bH;
+      const birdBottom = CONFIG.height - g.birdY;
+
+      g.pipes.forEach((pipe) => {
+        pipe.x -= g.pipeSpeed * dtFactor;
+        const px = pipe.x,
+          pr = pipe.x + 60;
+
+        if (birdRight > px + 5 && birdLeft < pr - 5) {
+          const inTop = birdTop < pipe.topH;
+          const inBottom = birdBottom > CONFIG.height - pipe.bottomH;
+          if (inTop || inBottom) {
+            if (g.isPowered) {
+              // Coin power: unlimited pipe crushing while active
+              if (!pipe.crushed) {
+                pipe.crushed = true;
+                playCrush();
+                setTimeout(() => {
+                  pipe.crushed = false;
+                }, 400);
+              }
+            } else if (g.bigMode) {
+              // Mushroom immunity: ignore all hits for 1 second, no crush effect
+            } else if (!pipe.crushed) {
+              endGame();
+              return;
+            }
+          }
+        } else {
+          pipe.crushed = false;
+        }
+
+        if (!pipe.passed && pipe.x < 80) {
+          pipe.passed = true;
+          g.score++;
+          g.pipesPassedCount++;
+          setUiScore(g.score);
+          if (g.pipesPassedCount >= 20 && !g.pipesWiggling)
+            g.pipesWiggling = true;
+          if (g.pipesPassedCount % 5 === 0) {
+            g.pipeSpeed += 0.3;
+            const newSpeed = Math.round(g.pipeSpeed * 10) / 10;
+            setUiSpeed(newSpeed);
+            showSpeedHint(`Taik makin ngebut: ${newSpeed.toFixed(1)}`);
+          }
+        }
+      });
+
+      if (g.pipes.length > 0 && g.pipes[0].x < -100) {
+        g.pipes.shift();
+        makePipe(g.pipes[g.pipes.length - 1].x + 600);
+      }
+
+      // Coins
       g.coins = g.coins.filter((coin) => {
         if (coin.collected) return false;
         coin.x -= g.pipeSpeed * dtFactor;
         if (coin.x < -40) return false;
         const r = coin.radius;
-        const cx = coin.x + r, cy2 = coin.y + r;
+        const cx = coin.x + r,
+          cy2 = coin.y + r;
         const bCx = 100 + bW / 2,
           bCy = CONFIG.height - g.birdY - bH / 2;
-        if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
+        if (
+          Math.abs(cx - bCx) < bW / 2 + r &&
+          Math.abs(cy2 - bCy) < bH / 2 + r
+        ) {
           coin.collected = true;
           g.score += coin.value;
           setUiScore(g.score);
@@ -1352,7 +1710,26 @@ export default function Game({
         return true;
       });
 
-      // Mushroom collection (dino mode)
+      // Poison clouds
+      g.poisons = g.poisons.filter((poison) => {
+        poison.x -= g.pipeSpeed * dtFactor;
+        if (poison.x + poison.r < 0) return false;
+        const bCx = 100 + bW / 2;
+        const bCy = CONFIG.height - g.birdY - bH / 2;
+        const dist = Math.sqrt((bCx - poison.x) ** 2 + (bCy - poison.y) ** 2);
+        if (dist < poison.r) {
+          poison.contactTime++;
+          if (poison.contactTime % 12 === 0) {
+            g.score = Math.max(0, g.score - 1);
+            setUiScore(g.score);
+          }
+        } else {
+          poison.contactTime = 0;
+        }
+        return true;
+      });
+
+      // Mushrooms
       g.mushrooms = g.mushrooms.filter((m) => {
         m.x -= g.pipeSpeed * dtFactor;
         if (m.x < -60) return false;
@@ -1371,158 +1748,22 @@ export default function Game({
         return true;
       });
 
-      // Sync dino position/score to multiplayer
+      // Sync to multiplayer
       if (!solo && socketRef.current) {
         socketRef.current.emit("player_update", {
           y: g.birdY,
           score: g.score,
           alive: true,
+          powered: g.isPowered,
           bigMode: g.bigMode,
         });
       }
 
       draw();
-      return;
-    }
-
-    const gravity = -0.5;
-    const jumpStrength = 9;
-
-    g.birdVelocity += gravity;
-    g.birdY += g.birdVelocity;
-
-    if (g.birdY <= 0) {
-      endGame();
-      return;
-    }
-    if (g.birdY >= CONFIG.height - 20 - g.birdSize.h) {
-      g.birdY = CONFIG.height - 20 - g.birdSize.h;
-      g.birdVelocity = 0;
-    }
-
-    // Pipes
-    const { w: bW, h: bH } = g.birdSize;
-    const birdLeft = 100,
-      birdRight = 100 + bW;
-    const birdTop = CONFIG.height - g.birdY - bH;
-    const birdBottom = CONFIG.height - g.birdY;
-
-    g.pipes.forEach((pipe) => {
-      pipe.x -= g.pipeSpeed * dtFactor;
-      const px = pipe.x,
-        pr = pipe.x + 60;
-
-      if (birdRight > px + 5 && birdLeft < pr - 5) {
-        const inTop = birdTop < pipe.topH;
-        const inBottom = birdBottom > CONFIG.height - pipe.bottomH;
-        if (inTop || inBottom) {
-          if (g.isPowered) {
-            // Coin power: unlimited pipe crushing while active
-            if (!pipe.crushed) {
-              pipe.crushed = true;
-              playCrush();
-              setTimeout(() => {
-                pipe.crushed = false;
-              }, 400);
-            }
-          } else if (g.bigMode) {
-            // Mushroom immunity: ignore all hits for 1 second, no crush effect
-          } else if (!pipe.crushed) {
-            endGame();
-            return;
-          }
-        }
-      } else {
-        pipe.crushed = false;
-      }
-
-      if (!pipe.passed && pipe.x < 80) {
-        pipe.passed = true;
-        g.score++;
-        g.pipesPassedCount++;
-        setUiScore(g.score);
-        if (g.pipesPassedCount >= 20 && !g.pipesWiggling)
-          g.pipesWiggling = true;
-        if (g.pipesPassedCount % 5 === 0) g.pipeSpeed += 0.3;
-      }
-    });
-
-    if (g.pipes.length > 0 && g.pipes[0].x < -100) {
-      g.pipes.shift();
-      makePipe(g.pipes[g.pipes.length - 1].x + 600);
-    }
-
-    // Coins
-    g.coins = g.coins.filter((coin) => {
-      if (coin.collected) return false;
-      coin.x -= g.pipeSpeed * dtFactor;
-      if (coin.x < -40) return false;
-      const r = coin.radius;
-      const cx = coin.x + r, cy2 = coin.y + r;
-      const bCx = 100 + bW / 2,
-        bCy = CONFIG.height - g.birdY - bH / 2;
-      if (Math.abs(cx - bCx) < bW / 2 + r && Math.abs(cy2 - bCy) < bH / 2 + r) {
-        coin.collected = true;
-        g.score += coin.value;
-        setUiScore(g.score);
-        playOink();
-        return false;
-      }
-      return true;
-    });
-
-    // Poison clouds
-    g.poisons = g.poisons.filter((poison) => {
-      poison.x -= g.pipeSpeed * dtFactor;
-      if (poison.x + poison.r < 0) return false;
-      const bCx = 100 + bW / 2;
-      const bCy = CONFIG.height - g.birdY - bH / 2;
-      const dist = Math.sqrt((bCx - poison.x) ** 2 + (bCy - poison.y) ** 2);
-      if (dist < poison.r) {
-        poison.contactTime++;
-        if (poison.contactTime % 12 === 0) {
-          g.score = Math.max(0, g.score - 1);
-          setUiScore(g.score);
-        }
-      } else {
-        poison.contactTime = 0;
-      }
-      return true;
-    });
-
-    // Mushrooms
-    g.mushrooms = g.mushrooms.filter((m) => {
-      m.x -= g.pipeSpeed * dtFactor;
-      if (m.x < -60) return false;
-      const mx = m.x + 18,
-        my = m.y + 18;
-      const bCx = 100 + bW / 2,
-        bCy = CONFIG.height - g.birdY - bH / 2;
-      if (
-        Math.abs(mx - bCx) < bW / 2 + 18 &&
-        Math.abs(my - bCy) < bH / 2 + 18
-      ) {
-        m.collected = true;
-        activateMushroom();
-        return false;
-      }
-      return true;
-    });
-
-    // Sync to multiplayer
-    if (!solo && socketRef.current) {
-      socketRef.current.emit("player_update", {
-        y: g.birdY,
-        score: g.score,
-        alive: true,
-        powered: g.isPowered,
-        bigMode: g.bigMode,
-      });
-    }
-
-    draw();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draw, solo]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    },
+    [draw, solo],
+  );
 
   function endGame() {
     const g = gameRef.current;
@@ -1543,10 +1784,18 @@ export default function Game({
     playLose();
 
     // Save score
+    const gameKey = g.dinoMode
+      ? solo
+        ? "baby_solo"
+        : "baby_multi"
+      : solo
+        ? "flappy_solo"
+        : "flappy_multi";
+
     fetch("/api/score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, score: g.score }),
+      body: JSON.stringify({ userId, score: g.score, gameKey }),
     });
 
     if (solo) {
@@ -1663,6 +1912,7 @@ export default function Game({
     g.deathParticles = [];
     g.winParticles = [];
     setUiScore(0);
+    setUiSpeed(g.initialSpeed);
     if (!g.dinoMode) initPipes(); // dino mode spawns cacti in tick
     g.started = true;
     g.lastTickMs = Date.now();
@@ -1950,10 +2200,22 @@ export default function Game({
     }
     return () => {
       if (t !== null) clearTimeout(t);
-      if (g.gameLoop) { clearInterval(g.gameLoop); g.gameLoop = null; }
-      if (g.countdownIv) { clearInterval(g.countdownIv); g.countdownIv = null; }
-      if (g.countdownDrawIv) { clearInterval(g.countdownDrawIv); g.countdownDrawIv = null; }
-      if (g.animLoop) { clearInterval(g.animLoop); g.animLoop = null; }
+      if (g.gameLoop) {
+        clearInterval(g.gameLoop);
+        g.gameLoop = null;
+      }
+      if (g.countdownIv) {
+        clearInterval(g.countdownIv);
+        g.countdownIv = null;
+      }
+      if (g.countdownDrawIv) {
+        clearInterval(g.countdownDrawIv);
+        g.countdownDrawIv = null;
+      }
+      if (g.animLoop) {
+        clearInterval(g.animLoop);
+        g.animLoop = null;
+      }
       g.started = false;
       g.over = false;
     };
@@ -2188,8 +2450,7 @@ export default function Game({
                       key={p.id}
                       className="flex items-center gap-1 bg-white/15 px-2 py-1 rounded-full text-sm font-bold"
                       style={{
-                        color:
-                          p.id === socketId ? "#ffd700" : "#fff",
+                        color: p.id === socketId ? "#ffd700" : "#fff",
                       }}
                     >
                       <span
@@ -2354,7 +2615,18 @@ export default function Game({
         style={{ width: CONFIG.width * canvasScale, maxWidth: "100%" }}
       >
         <span className="text-sm flex-1">
-          ⚡ Kecepatan: {roomSpeed}
+          ⚡ Kecepatan:
+          <span className="text-yellow-300 ml-1">{uiSpeed.toFixed(1)}</span>
+          {uiSpeed > (initialSpeed || 3) && (
+            <span className="ml-2 text-orange-300 text-xs font-normal">
+              (awal {(initialSpeed || 3).toFixed(1)})
+            </span>
+          )}
+          {speedHint && (
+            <span className="ml-3 px-2 py-0.5 bg-pink-500/20 text-pink-100 text-xs rounded-full">
+              {speedHint}
+            </span>
+          )}
         </span>
         {!solo && (
           <button

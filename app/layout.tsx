@@ -15,6 +15,8 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Ahhhh BABIIII 🐷",
   description: "Flappy Pig - Multiplayer online game",
+  icons: ["/next.svg"],
+  manifest: "/manifest.json",
 };
 
 export const viewport: Viewport = {

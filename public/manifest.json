@@ -1,0 +1,16 @@
+{
+  "name": "Ahhhh BABIIII",
+  "short_name": "Flappy Pig",
+  "description": "Flappy Pig - Multiplayer online game",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ff80ab",
+  "icons": [
+    {
+      "src": "/next.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192"
+    }
+  ]
+}

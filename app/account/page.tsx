@@ -1,9 +1,13 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { version as appVersion } from "../../package.json";
 
 const CHAR_EMOJI: Record<string, string> = {
-  pig: "🐷", dino: "🦕", bear: "🐻", panda: "🐼",
+  pig: "🐷",
+  dino: "🦕",
+  bear: "🐻",
+  panda: "🐼",
 };
 
 interface User {
@@ -13,9 +17,27 @@ interface User {
   character?: string;
 }
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
+const APP_CHANGELOG = [
+  {
+    version: "0.1.0",
+    date: "12 Mei 2026",
+    notes:
+      "Rilis awal aplikasi: lobby, game, leaderboard, diskusi, akun, dan pengelolaan pengguna.",
+  },
+];
+
 export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
   const [tab, setTab] = useState<"password" | "delete">("password");
+  const [deferredPrompt, setDeferredPrompt] =
+    useState<BeforeInstallPromptEvent | null>(null);
+  const [isAndroid, setIsAndroid] = useState(false);
+  const [installMessage, setInstallMessage] = useState("");
 
   const [oldPwd, setOldPwd] = useState("");
   const [newPwd, setNewPwd] = useState("");
@@ -30,46 +52,91 @@ export default function AccountPage() {
 
   useEffect(() => {
     const stored = localStorage.getItem("fp_user");
-    if (!stored) { router.push("/"); return; }
+    if (!stored) {
+      router.push("/");
+      return;
+    }
     setUser(JSON.parse(stored));
+
+    if (typeof window !== "undefined") {
+      setIsAndroid(/Android/i.test(navigator.userAgent));
+      const handler = (event: Event) => {
+        event.preventDefault();
+        setDeferredPrompt(event as BeforeInstallPromptEvent);
+      };
+      window.addEventListener("beforeinstallprompt", handler as EventListener);
+      return () =>
+        window.removeEventListener(
+          "beforeinstallprompt",
+          handler as EventListener,
+        );
+    }
   }, [router]);
 
-  function clearMsg() { setMsg(null); }
+  function clearMsg() {
+    setMsg(null);
+  }
 
   async function handleChangePassword(e: React.FormEvent) {
     e.preventDefault();
     clearMsg();
-    if (newPwd !== confirmPwd) { setMsg({ ok: false, text: "Password baru tidak cocok" }); return; }
-    if (newPwd.trim().length < 4) { setMsg({ ok: false, text: "Password baru minimal 4 karakter" }); return; }
-    setLoading(true);
-    const res = await fetch("/api/account", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "change_password", userId: user?.id, oldPassword: oldPwd, newPassword: newPwd.trim() }),
-    });
-    const data = await res.json();
-    setLoading(false);
-    if (data.error) { setMsg({ ok: false, text: data.error }); return; }
-    setMsg({ ok: true, text: "Password berhasil diubah!" });
-    setOldPwd(""); setNewPwd(""); setConfirmPwd("");
-  }
-
-  async function handleDelete(e: React.FormEvent) {
-    e.preventDefault();
-    clearMsg();
-    if (deleteConfirm !== user?.username) {
-      setMsg({ ok: false, text: `Ketik username "${user?.username}" dengan tepat` });
+    if (newPwd !== confirmPwd) {
+      setMsg({ ok: false, text: "Password baru tidak cocok" });
+      return;
+    }
+    if (newPwd.trim().length < 4) {
+      setMsg({ ok: false, text: "Password baru minimal 4 karakter" });
       return;
     }
     setLoading(true);
     const res = await fetch("/api/account", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "delete_account", userId: user?.id, password: deletePwd }),
+      body: JSON.stringify({
+        action: "change_password",
+        userId: user?.id,
+        oldPassword: oldPwd,
+        newPassword: newPwd.trim(),
+      }),
     });
     const data = await res.json();
     setLoading(false);
-    if (data.error) { setMsg({ ok: false, text: data.error }); return; }
+    if (data.error) {
+      setMsg({ ok: false, text: data.error });
+      return;
+    }
+    setMsg({ ok: true, text: "Password berhasil diubah!" });
+    setOldPwd("");
+    setNewPwd("");
+    setConfirmPwd("");
+  }
+
+  async function handleDelete(e: React.FormEvent) {
+    e.preventDefault();
+    clearMsg();
+    if (deleteConfirm !== user?.username) {
+      setMsg({
+        ok: false,
+        text: `Ketik username "${user?.username}" dengan tepat`,
+      });
+      return;
+    }
+    setLoading(true);
+    const res = await fetch("/api/account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "delete_account",
+        userId: user?.id,
+        password: deletePwd,
+      }),
+    });
+    const data = await res.json();
+    setLoading(false);
+    if (data.error) {
+      setMsg({ ok: false, text: data.error });
+      return;
+    }
     localStorage.removeItem("fp_user");
     router.push("/");
   }
@@ -78,23 +145,50 @@ export default function AccountPage() {
 
   const charEmoji = CHAR_EMOJI[user.character || "pig"] ?? "🐷";
 
+  async function handleInstallClick() {
+    if (deferredPrompt) {
+      await deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      if (choice.outcome === "accepted") {
+        setInstallMessage(
+          "Terima kasih! Aplikasi sekarang bisa diakses dari layar utama.",
+        );
+      } else {
+        setInstallMessage(
+          "Penginstalan dibatalkan. Anda tetap bisa menambahkannya manual dari menu browser.",
+        );
+      }
+      setDeferredPrompt(null);
+      return;
+    }
+    setInstallMessage(
+      "Untuk Android: buka menu browser dan pilih 'Tambahkan ke layar utama'.",
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center bg-linear-to-br from-pink-400 via-fuchsia-400 to-rose-400 px-4 py-8">
       <div className="bg-white/20 backdrop-blur-md rounded-3xl p-7 shadow-2xl w-full max-w-sm">
-
         {/* Header */}
         <div className="flex items-center gap-2 mb-5">
-          <a href="/lobby" className="text-white/70 hover:text-white text-sm underline shrink-0">
+          <a
+            href="/lobby"
+            className="text-white/70 hover:text-white text-sm underline shrink-0"
+          >
             ← Lobby
           </a>
-          <h1 className="text-white font-extrabold text-lg flex-1 text-center">⚙️ Kelola Akun</h1>
+          <h1 className="text-white font-extrabold text-lg flex-1 text-center">
+            ⚙️ Kelola Akun
+          </h1>
         </div>
 
         {/* Profile summary */}
         <div className="flex items-center gap-3 bg-white/10 rounded-2xl p-4 mb-5">
           <span className="text-4xl">{charEmoji}</span>
           <div>
-            <p className="text-white font-bold text-base leading-none">{user.username}</p>
+            <p className="text-white font-bold text-base leading-none">
+              {user.username}
+            </p>
             <p className="text-white/50 text-xs mt-1">ID #{user.id}</p>
           </div>
         </div>
@@ -102,13 +196,19 @@ export default function AccountPage() {
         {/* Tabs */}
         <div className="flex gap-1 bg-black/20 rounded-2xl p-1 mb-5">
           <button
-            onClick={() => { setTab("password"); clearMsg(); }}
+            onClick={() => {
+              setTab("password");
+              clearMsg();
+            }}
             className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${tab === "password" ? "bg-white text-pink-600 shadow" : "text-white/70 hover:text-white"}`}
           >
             🔑 Ubah Password
           </button>
           <button
-            onClick={() => { setTab("delete"); clearMsg(); }}
+            onClick={() => {
+              setTab("delete");
+              clearMsg();
+            }}
             className={`flex-1 py-2 rounded-xl font-bold text-sm transition ${tab === "delete" ? "bg-red-500 text-white shadow" : "text-white/70 hover:text-white"}`}
           >
             🗑️ Hapus Akun
@@ -117,7 +217,9 @@ export default function AccountPage() {
 
         {/* Message */}
         {msg && (
-          <div className={`rounded-xl px-4 py-2.5 mb-4 text-sm font-semibold text-center ${msg.ok ? "bg-green-500/30 text-green-100" : "bg-red-500/30 text-red-100"}`}>
+          <div
+            className={`rounded-xl px-4 py-2.5 mb-4 text-sm font-semibold text-center ${msg.ok ? "bg-green-500/30 text-green-100" : "bg-red-500/30 text-red-100"}`}
+          >
             {msg.text}
           </div>
         )}
@@ -125,22 +227,29 @@ export default function AccountPage() {
         {tab === "password" ? (
           <form onSubmit={handleChangePassword} className="flex flex-col gap-3">
             <input
-              type="password" placeholder="Password lama..." value={oldPwd}
+              type="password"
+              placeholder="Password lama..."
+              value={oldPwd}
               onChange={(e) => setOldPwd(e.target.value)}
               className="px-4 py-3 rounded-xl bg-white/80 text-gray-700 font-semibold outline-none focus:ring-4 focus:ring-pink-300"
             />
             <input
-              type="password" placeholder="Password baru (min. 4 karakter)..." value={newPwd}
+              type="password"
+              placeholder="Password baru (min. 4 karakter)..."
+              value={newPwd}
               onChange={(e) => setNewPwd(e.target.value)}
               className="px-4 py-3 rounded-xl bg-white/80 text-gray-700 font-semibold outline-none focus:ring-4 focus:ring-pink-300"
             />
             <input
-              type="password" placeholder="Konfirmasi password baru..." value={confirmPwd}
+              type="password"
+              placeholder="Konfirmasi password baru..."
+              value={confirmPwd}
               onChange={(e) => setConfirmPwd(e.target.value)}
               className="px-4 py-3 rounded-xl bg-white/80 text-gray-700 font-semibold outline-none focus:ring-4 focus:ring-pink-300"
             />
             <button
-              type="submit" disabled={loading}
+              type="submit"
+              disabled={loading}
               className="py-3 bg-pink-500 hover:bg-pink-400 text-white font-bold rounded-xl transition active:scale-95 disabled:opacity-60"
             >
               {loading ? "Menyimpan..." : "Simpan Password"}
@@ -149,10 +258,13 @@ export default function AccountPage() {
         ) : (
           <form onSubmit={handleDelete} className="flex flex-col gap-3">
             <div className="bg-red-500/20 rounded-xl p-3 text-red-100 text-sm leading-relaxed">
-              ⚠️ Aksi ini <strong>tidak dapat dibatalkan</strong>. Semua data termasuk skor akan dihapus permanen.
+              ⚠️ Aksi ini <strong>tidak dapat dibatalkan</strong>. Semua data
+              termasuk skor akan dihapus permanen.
             </div>
             <input
-              type="password" placeholder="Password akun..." value={deletePwd}
+              type="password"
+              placeholder="Password akun..."
+              value={deletePwd}
               onChange={(e) => setDeletePwd(e.target.value)}
               className="px-4 py-3 rounded-xl bg-white/80 text-gray-700 font-semibold outline-none focus:ring-4 focus:ring-red-300"
             />
@@ -175,8 +287,52 @@ export default function AccountPage() {
 
         {/* Footer links */}
         <div className="mt-6 pt-4 border-t border-white/20 flex justify-center gap-4 text-xs">
-          <a href="/terms" className="text-white/60 hover:text-white underline">Kebijakan Penggunaan</a>
-          <a href="/privacy" className="text-white/60 hover:text-white underline">Kebijakan Privasi</a>
+          <a href="/terms" className="text-white/60 hover:text-white underline">
+            Kebijakan Penggunaan
+          </a>
+          <a
+            href="/privacy"
+            className="text-white/60 hover:text-white underline"
+          >
+            Kebijakan Privasi
+          </a>
+        </div>
+
+        {/* App version and history */}
+        <div className="mt-6 rounded-3xl bg-white/10 p-4 text-white/90">
+          <h2 className="font-bold text-base mb-3">📦 Info Aplikasi</h2>
+          <div className="space-y-2 text-sm text-white/80">
+            <div>
+              Versi aplikasi:{" "}
+              <span className="font-semibold text-white">{appVersion}</span>
+            </div>
+            <div>Riwayat pembaruan:</div>
+            <ul className="list-disc list-inside space-y-2">
+              {APP_CHANGELOG.map((item) => (
+                <li key={item.version} className="text-white/90">
+                  <span className="font-semibold">{item.version}</span> (
+                  {item.date}) — {item.notes}
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {isAndroid && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={handleInstallClick}
+                className="w-full py-3 bg-pink-500 hover:bg-pink-400 text-white rounded-2xl font-bold transition active:scale-95"
+              >
+                {deferredPrompt
+                  ? "Instal Instan ke Home Screen"
+                  : "Tambahkan ke Layar Utama Android"}
+              </button>
+              {installMessage && (
+                <p className="mt-3 text-xs text-white/80">{installMessage}</p>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

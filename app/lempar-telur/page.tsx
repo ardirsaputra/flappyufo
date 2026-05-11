@@ -2,10 +2,18 @@
 import { useEffect, useState, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import SoloLeaderboard from "@/components/SoloLeaderboard";
 
-const LemparTelur = dynamic(() => import("@/components/LemparTelur"), { ssr: false });
+const LemparTelur = dynamic(() => import("@/components/LemparTelur"), {
+  ssr: false,
+});
 
-interface User { id: number; username: string; pigColor?: string; character?: string; }
+interface User {
+  id: number;
+  username: string;
+  pigColor?: string;
+  character?: string;
+}
 
 function LemparTelurInner() {
   const searchParams = useSearchParams();
@@ -17,7 +25,10 @@ function LemparTelurInner() {
 
   useEffect(() => {
     const stored = localStorage.getItem("fp_user");
-    if (!stored) { router.push("/"); return; }
+    if (!stored) {
+      router.push("/");
+      return;
+    }
     setUser(JSON.parse(stored));
   }, [router]);
 
@@ -32,48 +43,93 @@ function LemparTelurInner() {
     else document.exitFullscreen();
   }
 
-  if (!roomId) return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 to-indigo-900">
-      <div className="text-white text-center">
-        <p className="text-2xl font-bold mb-2">❌ Room tidak ditemukan</p>
-        <a href="/lobby" className="text-yellow-400 underline">← Kembali ke Lobby</a>
+  if (!roomId)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-900 to-indigo-900">
+        <div className="text-white text-center">
+          <p className="text-2xl font-bold mb-2">❌ Room tidak ditemukan</p>
+          <a href="/lobby" className="text-yellow-400 underline">
+            ← Kembali ke Lobby
+          </a>
+        </div>
       </div>
-    </div>
-  );
+    );
 
-  if (!user) return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 to-indigo-900">
-      <div className="text-white text-2xl font-bold animate-pulse">Loading...</div>
-    </div>
-  );
+  if (!user)
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-900 to-indigo-900">
+        <div className="text-white text-2xl font-bold animate-pulse">
+          Loading...
+        </div>
+      </div>
+    );
 
   return (
-    <div ref={wrapRef} className={`min-h-screen flex flex-col items-center justify-start bg-gradient-to-br from-purple-900 via-indigo-900 to-fuchsia-900 pt-2 pb-4 px-2 ${isFullscreen ? "justify-center" : ""}`}>
-      <div className="mb-2 flex items-center gap-3 w-full max-w-[820px]">
-        <a href="/lobby" className="text-white/70 hover:text-white text-sm underline shrink-0">← Lobby</a>
-        <span className="text-white font-bold text-base flex-1 text-center">🥚 Lempar Telur{roomId === "solo" ? " — Solo" : ""}</span>
-        {roomId !== "solo" && <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0">{roomId}</span>}
-        <button onClick={toggleFullscreen} className="text-white/60 hover:text-white text-lg shrink-0 transition" title="Fullscreen">
+    <div
+      ref={wrapRef}
+      className={`min-h-screen flex flex-col items-center justify-start bg-linear-to-br from-purple-900 via-indigo-900 to-fuchsia-900 pt-2 pb-4 px-2 ${isFullscreen ? "justify-center" : ""}`}
+    >
+      <div className="mb-2 flex items-center gap-3 w-full max-w-205">
+        <a
+          href="/lobby"
+          className="text-white/70 hover:text-white text-sm underline shrink-0"
+        >
+          ← Lobby
+        </a>
+        <span className="text-white font-bold text-base flex-1 text-center">
+          🥚 Lempar Telur{roomId === "solo" ? " — Solo" : ""}
+        </span>
+        {roomId !== "solo" && (
+          <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0">
+            {roomId}
+          </span>
+        )}
+        {roomId === "solo" && (
+          <a
+            href="/leaderboard?game=egg_solo"
+            className="text-white/70 hover:text-white text-sm underline shrink-0"
+          >
+            🏆
+          </a>
+        )}
+        <button
+          onClick={toggleFullscreen}
+          className="text-white/60 hover:text-white text-lg shrink-0 transition"
+          title="Fullscreen"
+        >
           {isFullscreen ? "⛶" : "⛶"}
         </button>
       </div>
       <LemparTelur
         roomId={roomId}
+        userId={user.id}
         username={user.username}
         pigColor={user.pigColor || "pink"}
         character={user.character || "pig"}
       />
+      {roomId === "solo" && (
+        <div className="mt-3 w-full flex justify-center">
+          <SoloLeaderboard
+            gameKey="egg_solo"
+            title="Peringkat Lempar Telur Solo"
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 export default function LemparTelurPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-purple-900 to-indigo-900">
-        <div className="text-white text-2xl font-bold animate-pulse">Loading...</div>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-purple-900 to-indigo-900">
+          <div className="text-white text-2xl font-bold animate-pulse">
+            Loading...
+          </div>
+        </div>
+      }
+    >
       <LemparTelurInner />
     </Suspense>
   );

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 interface LeaderboardEntry {
   username: string;
@@ -7,18 +8,47 @@ interface LeaderboardEntry {
   games_played: number;
 }
 
+const GAME_OPTIONS = [
+  { key: "", label: "Semua" },
+  { key: "flappy_solo", label: "Flappy Solo" },
+  { key: "baby_solo", label: "Baby Dino Solo" },
+  { key: "egg_solo", label: "Lempar Telur Solo" },
+];
+
+const VALID_GAME_KEYS = new Set(GAME_OPTIONS.map((g) => g.key));
+
 export default function LeaderboardPage() {
+  const searchParams = useSearchParams();
   const [data, setData] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedGame, setSelectedGame] = useState("");
 
   useEffect(() => {
-    fetch("/api/leaderboard")
-      .then((r) => r.json())
-      .then((d) => {
+    const game = (searchParams?.get("game") || "").trim().toLowerCase();
+    setSelectedGame(VALID_GAME_KEYS.has(game) ? game : "");
+  }, [searchParams]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLeaderboard() {
+      setLoading(true);
+      const qs = selectedGame
+        ? `?game=${encodeURIComponent(selectedGame)}&limit=20`
+        : "?limit=20";
+      const r = await fetch(`/api/leaderboard${qs}`);
+      const d = await r.json();
+      if (active) {
         setData(d.leaderboard || []);
         setLoading(false);
-      });
-  }, []);
+      }
+    }
+
+    loadLeaderboard().catch(() => setLoading(false));
+    return () => {
+      active = false;
+    };
+  }, [selectedGame]);
 
   const medals = ["🥇", "🥈", "🥉"];
 
@@ -28,7 +58,25 @@ export default function LeaderboardPage() {
         <div className="text-center mb-6">
           <div className="text-5xl mb-2">🏆</div>
           <h1 className="text-3xl font-extrabold text-white">Leaderboard</h1>
-          <p className="text-white/70 text-sm mt-1">Top 20 pemain terbaik</p>
+          <p className="text-white/70 text-sm mt-1">
+            Top 20 pemain terbaik per mode
+          </p>
+        </div>
+
+        <div className="mb-4 flex flex-wrap gap-2 justify-center">
+          {GAME_OPTIONS.map((opt) => (
+            <button
+              key={opt.key || "all"}
+              onClick={() => setSelectedGame(opt.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                selectedGame === opt.key
+                  ? "bg-yellow-300 text-black"
+                  : "bg-white/15 text-white hover:bg-white/25"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         {loading ? (
@@ -85,7 +133,10 @@ export default function LeaderboardPage() {
           <button
             onClick={() => {
               setLoading(true);
-              fetch("/api/leaderboard")
+              const qs = selectedGame
+                ? `?game=${encodeURIComponent(selectedGame)}&limit=20`
+                : "?limit=20";
+              fetch(`/api/leaderboard${qs}`)
                 .then((r) => r.json())
                 .then((d) => {
                   setData(d.leaderboard || []);

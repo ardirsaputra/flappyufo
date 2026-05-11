@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { Suspense } from "react";
+import SoloLeaderboard from "@/components/SoloLeaderboard";
 
 const Game = dynamic(() => import("@/components/Game"), { ssr: false });
 
@@ -23,10 +24,15 @@ function GamePageInner() {
   const roomId = searchParams?.get("room") || "solo-room";
   const initialSpeed = parseFloat(searchParams?.get("speed") || "3");
   const roomPassword = searchParams?.get("pw") || "";
+  const soloGameKey = mode === "baby" ? "baby_solo" : "flappy_solo";
+  const isSoloMode = mode === "solo" || mode === "baby";
 
   useEffect(() => {
     const stored = localStorage.getItem("fp_user");
-    if (!stored) { router.push("/"); return; }
+    if (!stored) {
+      router.push("/");
+      return;
+    }
     setUser(JSON.parse(stored));
   }, [router]);
 
@@ -51,17 +57,42 @@ function GamePageInner() {
     );
 
   return (
-    <div ref={wrapRef} className="min-h-screen flex flex-col items-center justify-start bg-linear-to-br from-purple-700 via-fuchsia-600 to-pink-500 pt-2 pb-4 px-2">
-      <div className="mb-2 flex items-center gap-3 w-full max-w-[800px]">
-        <a href="/lobby" className="text-white/70 hover:text-white text-sm underline shrink-0">← Lobby</a>
+    <div
+      ref={wrapRef}
+      className="min-h-screen flex flex-col items-center justify-start bg-linear-to-br from-purple-700 via-fuchsia-600 to-pink-500 pt-2 pb-4 px-2"
+    >
+      <div className="mb-2 flex items-center gap-3 w-full max-w-200">
+        <a
+          href="/lobby"
+          className="text-white/70 hover:text-white text-sm underline shrink-0"
+        >
+          ← Lobby
+        </a>
         <span className="text-white font-bold text-base flex-1 text-center truncate">
-          {mode === "baby" ? "👶 Baby Dino" : "🐷 Flappy Pig"} {mode.startsWith("multi") ? "— Multi" : "— Solo"}
+          {mode === "baby" ? "👶 Baby Dino" : "🐷 Flappy Pig"}{" "}
+          {mode.startsWith("multi") ? "— Multi" : "— Solo"}
+        </span>
+        <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0 flex items-center gap-1">
+          ⚡{initialSpeed}
         </span>
         {(mode === "multi" || mode === "multi-dino") && (
-          <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0 max-w-[100px] truncate">{roomId}</span>
+          <span className="bg-white/20 text-yellow-200 text-xs font-mono font-bold px-2 py-1 rounded-full shrink-0 max-w-25 truncate">
+            {roomId}
+          </span>
         )}
-        <a href="/leaderboard" className="text-white/70 hover:text-white text-sm underline shrink-0">🏆</a>
-        <button onClick={toggleFs} className="text-white/60 hover:text-white text-lg shrink-0 transition" title="Fullscreen">
+        <a
+          href={
+            isSoloMode ? `/leaderboard?game=${soloGameKey}` : "/leaderboard"
+          }
+          className="text-white/70 hover:text-white text-sm underline shrink-0"
+        >
+          🏆
+        </a>
+        <button
+          onClick={toggleFs}
+          className="text-white/60 hover:text-white text-lg shrink-0 transition"
+          title="Fullscreen"
+        >
           {isFs ? "⛶" : "⛶"}
         </button>
       </div>
@@ -69,13 +100,25 @@ function GamePageInner() {
         username={user.username}
         userId={user.id}
         roomId={roomId}
-        solo={mode === "solo" || mode === "baby"}
+        solo={isSoloMode}
         dinoMode={mode === "baby" || mode === "multi-dino"}
         pigColor={user.pigColor || "pink"}
         character={user.character || "pig"}
         initialSpeed={initialSpeed}
         password={roomPassword}
       />
+      {isSoloMode && (
+        <div className="mt-3 w-full flex justify-center">
+          <SoloLeaderboard
+            gameKey={soloGameKey}
+            title={
+              mode === "baby"
+                ? "Peringkat Baby Dino Solo"
+                : "Peringkat Flappy Pig Solo"
+            }
+          />
+        </div>
+      )}
     </div>
   );
 }

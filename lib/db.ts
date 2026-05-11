@@ -31,6 +31,7 @@ export async function initDB() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
       score INTEGER NOT NULL,
+      game_key VARCHAR(32) NOT NULL DEFAULT 'flappy_solo',
       created_at TIMESTAMP DEFAULT NOW()
     );
 
@@ -51,5 +52,20 @@ export async function initDB() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN DEFAULT FALSE;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_device_id VARCHAR(64);
     ALTER TABLE users ADD COLUMN IF NOT EXISTS last_ip VARCHAR(64);
+    ALTER TABLE scores ADD COLUMN IF NOT EXISTS game_key VARCHAR(32) DEFAULT 'flappy_solo';
+    ALTER TABLE scores ALTER COLUMN game_key SET DEFAULT 'flappy_solo';
+    UPDATE scores SET game_key='flappy_solo' WHERE game_key IS NULL;
+    ALTER TABLE scores ALTER COLUMN game_key SET NOT NULL;
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS discussions (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      username VARCHAR(32) NOT NULL,
+      pig_color VARCHAR(16) DEFAULT 'pink',
+      content TEXT NOT NULL,
+      parent_id INTEGER REFERENCES discussions(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT NOW()
+    );
   `);
 }

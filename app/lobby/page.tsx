@@ -575,6 +575,13 @@ export default function LobbyPage() {
             </div>
             <div className="flex items-center gap-3 shrink-0 text-xs">
               <a
+                href="/discussion"
+                className="text-white/60 hover:text-white transition"
+                title="Forum Diskusi"
+              >
+                💬
+              </a>
+              <a
                 href="/leaderboard"
                 className="text-white/60 hover:text-white transition"
               >
@@ -1389,6 +1396,14 @@ export default function LobbyPage() {
             </>
           )}
         </div>
+
+        {/* Discussion CTA */}
+        <a
+          href="/discussion"
+          className="flex items-center justify-center gap-2 w-full py-3 bg-white/15 hover:bg-white/25 backdrop-blur-md rounded-2xl shadow-lg transition active:scale-95 text-white font-bold text-sm"
+        >
+          💬 Forum Diskusi Pengembangan
+        </a>
 
         {/* Footer */}
         <div className="flex justify-center gap-4 text-xs text-white/40 pb-1">
