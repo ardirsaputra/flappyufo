@@ -1,4 +1,4 @@
-import type { NextApiRequest, NextApiResponse } from "next";
+import { NextResponse } from "next/server";
 import { pool, initDB } from "@/lib/db";
 import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
 
@@ -18,21 +18,22 @@ function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
-function getClientIp(req: NextApiRequest): string {
-  const forwarded = req.headers["x-forwarded-for"];
-  const raw = Array.isArray(forwarded) ? forwarded[0] : forwarded;
-  return (raw || req.socket?.remoteAddress || "").split(",")[0].trim();
+function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  return (forwarded || "").split(",")[0].trim();
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export async function POST(req: Request) {
   await initDB();
-  if (req.method !== "POST") return res.status(405).end();
 
-  const { action, username, password, deviceId } = req.body as {
-    action: "register" | "login";
-    username: string;
-    password: string;
+  const body = await req.json().catch(() => ({}));
+  const { action, username, password, deviceId, character, pigColor } = body as {
+    action?: "register" | "login";
+    username?: string;
+    password?: string;
     deviceId?: string;
+    character?: string;
+    pigColor?: string;
   };
 
   const clean = String(username || "")
@@ -40,11 +41,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, "");
   if (!clean || clean.length < 2)
-    return res.status(400).json({ error: "Username minimal 2 karakter" });
+    return NextResponse.json({ error: "Username minimal 2 karakter" }, { status: 400 });
 
   const pwd = String(password || "").trim();
   if (!pwd || pwd.length < 4)
-    return res.status(400).json({ error: "Password minimal 4 karakter" });
+    return NextResponse.json({ error: "Password minimal 4 karakter" }, { status: 400 });
 
   const ip = getClientIp(req);
 
@@ -56,23 +57,23 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         [deviceId],
       );
       if (blocked.rows.length > 0)
-        return res.status(403).json({ error: "Perangkat ini diblokir. Hubungi admin." });
+        return NextResponse.json({ error: "Perangkat ini diblokir. Hubungi admin." }, { status: 403 });
     }
 
     if (action === "register") {
       const existing = await pool.query("SELECT id FROM users WHERE username=$1", [clean]);
       if (existing.rows.length > 0)
-        return res.status(400).json({ error: "Username sudah digunakan" });
+        return NextResponse.json({ error: "Username sudah digunakan" }, { status: 400 });
 
       const passwordHash = hashPassword(pwd);
       const isAdmin = clean === "admin";
       const result = await pool.query(
-        `INSERT INTO users (username, password_hash, is_admin, last_device_id, last_ip)
-         VALUES ($1, $2, $3, $4, $5)
+        `INSERT INTO users (username, password_hash, is_admin, last_device_id, last_ip, character, pig_color)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id, username, character, pig_color, is_admin`,
-        [clean, passwordHash, isAdmin, deviceId || null, ip || null],
+        [clean, passwordHash, isAdmin, deviceId || null, ip || null, character || "pig", pigColor || "pink"],
       );
-      return res.status(201).json({ user: result.rows[0] });
+      return NextResponse.json({ user: result.rows[0] }, { status: 201 });
     }
 
     if (action === "login") {
@@ -81,7 +82,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         [clean],
       );
       if (result.rows.length === 0)
-        return res.status(401).json({ error: "Username tidak ditemukan" });
+        return NextResponse.json({ error: "Username tidak ditemukan" }, { status: 401 });
 
       const user = result.rows[0];
 
@@ -98,7 +99,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           "UPDATE users SET password_hash=$1, last_device_id=$2, last_ip=$3 WHERE id=$4",
           [passwordHash, deviceId || null, ip || null, user.id],
         );
-        return res.status(200).json({
+        return NextResponse.json({
           user: {
             id: user.id,
             username: user.username,
@@ -106,18 +107,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             pig_color: user.pig_color || "pink",
             is_admin: user.is_admin || false,
           },
-        });
+        }, { status: 200 });
       }
 
       if (!verifyPassword(pwd, user.password_hash))
-        return res.status(401).json({ error: "Password salah" });
+        return NextResponse.json({ error: "Password salah" }, { status: 401 });
 
       await pool.query(
         "UPDATE users SET last_device_id=$1, last_ip=$2 WHERE id=$3",
         [deviceId || null, ip || null, user.id],
       );
 
-      return res.status(200).json({
+      return NextResponse.json({
         user: {
           id: user.id,
           username: user.username,
@@ -125,12 +126,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           pig_color: user.pig_color || "pink",
           is_admin: user.is_admin || false,
         },
-      });
+      }, { status: 200 });
     }
 
-    return res.status(400).json({ error: "Action tidak valid" });
+    return NextResponse.json({ error: "Action tidak valid" }, { status: 400 });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "Server error" });
+    return NextResponse.json({ error: "Server error" }, { status: 500 });
   }
 }

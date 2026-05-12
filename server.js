@@ -101,10 +101,12 @@ setInterval(
 );
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────
-// httpServer must be created BEFORE next() so Turbopack can attach its HMR
-// WebSocket handler to the same server (Next.js 16 requirement).
+// httpServer must be created BEFORE next() so the HMR WebSocket handler
+// can attach to the same server (Next.js 16 requirement).
+// Turbopack is disabled because it panics with custom httpServer wrappers
+// ("Next.js package not found"). Webpack is used instead for dev mode.
 const httpServer = createServer();
-const app = next({ dev, port, httpServer });
+const app = next({ dev, port, httpServer, turbopack: false });
 const handle = app.getRequestHandler();
 
 httpServer.on("request", (req, res) => {
